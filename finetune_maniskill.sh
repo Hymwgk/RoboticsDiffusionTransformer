@@ -1,17 +1,26 @@
+# 适合单机训练
 export NCCL_IB_HCA=mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_7:1,mlx5_8:1,mlx5_9:1
 export NCCL_IB_DISABLE=0
 export NCCL_SOCKET_IFNAME=bond0
 export NCCL_DEBUG=INFO
 export NCCL_NVLS_ENABLE=0
-
+# 添加公共huggingface缓存路径环境变量
+export HF_HOME=/model/huggingface
+export HUGGINGFACE_HUB_CACHE=/model/huggingface/hub
+# 设定文本编码器和视觉编码器的名称，使用公共文件夹下的预训练模块
+# 保持默认，前提是按照教程设置了软链接（见Readme），否则需要修改为实际路径
 export TEXT_ENCODER_NAME="google/t5-v1_1-xxl"
 export VISION_ENCODER_NAME="google/siglip-so400m-patch14-384"
-export OUTPUT_DIR="./checkpoints/rdt-finetune-1b-sim"
+# 设定为自己账户 wgk 文件夹下
+export OUTPUT_DIR="/model/wgk/checkpoints/rdt-finetune-1b-sim"
+# 默认不管
 export CFLAGS="-I/usr/include"
 export LDFLAGS="-L/usr/lib/x86_64-linux-gnu"
 export CUTLASS_PATH="/data/lingxuan/cutlass"
-
+# 设置wandb的项目名称和离线模式，确保训练日志能够正确记录到指定项目中，并且避免wandb尝试连接服务器
 export WANDB_PROJECT="robotic_diffusion_transformer"
+export WANDB_MODE=offline
+
 
 if [ ! -d "$OUTPUT_DIR" ]; then
     mkdir "$OUTPUT_DIR"

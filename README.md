@@ -41,33 +41,65 @@ The following guides include the [installation](#installation), [fine-tuning](#f
     # Look up https://pytorch.org/get-started/previous-versions/ with your cuda version for a correct command
     pip install torch==2.1.0 torchvision==0.16.0  --index-url https://download.pytorch.org/whl/cu121
     
-    # Install packaging
-    pip install packaging==24.0
-    
-    # Install flash-attn
-    pip install flash-attn --no-build-isolation
-    
     # Install other prequisites
-    pip install -r requirements.txt
+    pip install -r requirements.txt    
+        
+    # Install flash-attn  
+    cd ~/
+    wget https://github.com/Dao-AILab/flash-attention/releases/download/v2.2.2/flash_attn-2.2.2+cu121torch2.1cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+
+    pip install flash_attn-2.2.2+cu121torch2.1cxx11abiFALSE-cp310-cp310-linux_x86_64.whl 
+
+
+
     ```
 
 2. Download off-the-shelf multi-modal encoders:
 
-   You can download the encoders from the following links:
+   检查服务器的已有文件结构，确保存在且`/model/huggingface/hub`的文件结构为
+   ```
+      .
+   ├── models--google--siglip-so400m-patch14-384
+   │   ├── blobs
+   │   ├── refs
+   │   └── snapshots
+   ├── models--robotics-diffusion-transformer--rdt-1b
+   │   ├── blobs
+   │   ├── refs
+   │   └── snapshots
+   ├── t5-v1_1-xxl
+   │   ├── README.md
+   │   ├── config.json
+   │   ├── generation_config.json
+   │   ├── pytorch_model.bin
+   │   ├── special_tokens_map.json
+   │   ├── spiece.model
+   │   ├── tf_model.h5
+   │   └── tokenizer_config.json
+   ├── version.txt
+   └── version_diffusers_cache.txt
+   ```
+
+   否则，在`/model`中创建huggingface缓存文件夹
+   ```
+   mkdir -p /model/huggingface/hub
+   ```
+   从此处下载预训练的编码器模型参数，将下载的编码器参数放在`/model/huggingface/hub`文件夹中
 
    - `t5-v1_1-xxl`: [link](https://huggingface.co/google/t5-v1_1-xxl/tree/main)🤗
    - `siglip`: [link](https://huggingface.co/google/siglip-so400m-patch14-384)🤗
 
-   And link the encoders to the repo directory:
-
-   ```bash
-   # Under the root directory of this repo
-   mkdir -p google
-   
-   # Link the downloaded encoders to this repo
-   ln -s /path/to/t5-v1_1-xxl google/t5-v1_1-xxl
-   ln -s /path/to/siglip-so400m-patch14-384 google/siglip-so400m-patch14-384
+   创建预训练编码器软链接
    ```
+   # 在本项目根文件夹目录下
+   cd /path_to/your_project_root 
+   mkdir -p google
+   # 创建软链接
+   ln -s /model/huggingface/hub/t5-v1_1-xxl  google/t5-v1_1-xxl
+   ln -s /model/huggingface/hub/siglip  google/siglip-so400m-patch14-384
+   ```
+
+
 3. Fill the missing argument in [this file](configs/base.yaml#L22):
    
    Note that this buffer will only be used during pre-training. See [this doc](docs/pretrain.md) for more details.
