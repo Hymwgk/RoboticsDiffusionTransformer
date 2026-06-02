@@ -18,8 +18,8 @@ class HDF5VLADataset:
     def __init__(self) -> None:
         # [Modify] The path to the HDF5 dataset directory
         # Each HDF5 file contains one episode
-        HDF5_DIR = "data/datasets/agilex/rdt_data/"
-        self.DATASET_NAME = "agilex"
+        HDF5_DIR = "data/datasets/rdt_js"
+        self.DATASET_NAME = "rdt_js"
         
         self.file_paths = []
         for root, _, files in os.walk(HDF5_DIR):
@@ -74,7 +74,8 @@ class HDF5VLADataset:
                 index = np.random.randint(0, len(self.file_paths))
     
     def parse_hdf5_file(self, file_path):
-        """[Modify] Parse a hdf5 file to generate a training sample at
+        """打开每个回合的hdf5
+        [Modify] Parse a hdf5 file to generate a training sample at
             a random timestep.
 
         Args:
@@ -112,16 +113,19 @@ class HDF5VLADataset:
                     "cam_right_wrist_mask": ndarray
                 } or None if the episode is invalid.
         """
+        # 
         with h5py.File(file_path, 'r') as f:
+            
             qpos = f['observations']['qpos'][:]
             num_steps = qpos.shape[0]
-            # [Optional] We drop too-short episode
+            # [Optional] 要求每个回合的长度不小于128步
             if num_steps < 128:
                 return False, None
             
             # [Optional] We skip the first few still steps
             EPS = 1e-2
             # Get the idx of the first qpos whose delta exceeds the threshold
+            # 这里的目的是为了跳过回合开始时机械臂还没有动的那些步骤
             qpos_delta = np.abs(qpos - qpos[0:1])
             indices = np.where(np.any(qpos_delta > EPS, axis=1))[0]
             if len(indices) > 0:
@@ -129,10 +133,10 @@ class HDF5VLADataset:
             else:
                 raise ValueError("Found no qpos that exceeds the threshold.")
             
-            # We randomly sample a timestep
+            # 随机采样一个时间步，作为起始，要求至少有CHUNK_SIZE的动作可以用来预测
             step_id = np.random.randint(first_idx-1, num_steps)
             
-            # Load the instruction
+            # 读取语言指令
             dir_path = os.path.dirname(file_path)
             with open(os.path.join(dir_path, 'expanded_instruction_gpt-4-turbo.json'), 'r') as f_instr:
                 instruction_dict = json.load(f_instr)
@@ -155,20 +159,22 @@ class HDF5VLADataset:
                 "instruction": instruction
             }
             
-            # Rescale gripper to [0, 1]
-            qpos = qpos / np.array(
-               [[1, 1, 1, 1, 1, 1, 4.7908, 1, 1, 1, 1, 1, 1, 4.7888]] 
-            )
-            target_qpos = f['action'][step_id:step_id+self.CHUNK_SIZE] / np.array(
-               [[1, 1, 1, 1, 1, 1, 11.8997, 1, 1, 1, 1, 1, 1, 13.9231]] 
-            )
+            # 将夹爪动作缩放到 [0, 1] 已经在isaaclab_to_rdt.py里做了，这里就不重复了
+            # right_pos(3) + right_rot6d(6) + right_gripper(1)
+            # left_pos(3) + left_rot6d(6) + left_gripper(1)
+            # qpos = qpos / np.array(
+            #    [[1, 1, 1, 1, 1, 1, 4.7908, 1, 1, 1, 1, 1, 1, 4.7888]] 
+            # )
+
+            #
             
             # Parse the state and action
             state = qpos[step_id:step_id+1]
             state_std = np.std(qpos, axis=0)
             state_mean = np.mean(qpos, axis=0)
             state_norm = np.sqrt(np.mean(qpos**2, axis=0))
-            actions = target_qpos
+            actions = f['action'][step_id:step_id+self.CHUNK_SIZE] 
+
             if actions.shape[0] < self.CHUNK_SIZE:
                 # Pad the actions using the last action
                 actions = np.concatenate([
@@ -176,22 +182,59 @@ class HDF5VLADataset:
                     np.tile(actions[-1:], (self.CHUNK_SIZE-actions.shape[0], 1))
                 ], axis=0)
             
-            # Fill the state/action into the unified vector
+            # 将状态观测填充到统一的向量空间中
             def fill_in_state(values):
-                # Target indices corresponding to your state space
-                # In this example: 6 joints + 1 gripper for each arm
+                # values: (..., 34)
+                # right_arm_joint_pos(7) + right_pos(3) + right_rot6d(6) + right_gripper(1)
+                # left_arm_joint_pos(7) + left_pos(3)  + left_rot6d(6)  + left_gripper(1)
+
                 UNI_STATE_INDICES = [
-                    STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(6)
-                ] + [
-                    STATE_VEC_IDX_MAPPING["left_gripper_open"]
-                ] + [
-                    STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(6)
-                ] + [
-                    STATE_VEC_IDX_MAPPING["right_gripper_open"]
+                    *[STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(7)],
+                    STATE_VEC_IDX_MAPPING["right_eef_pos_x"],
+                    STATE_VEC_IDX_MAPPING["right_eef_pos_y"],
+                    STATE_VEC_IDX_MAPPING["right_eef_pos_z"],
+                    *[STATE_VEC_IDX_MAPPING[f"right_eef_angle_{i}"] for i in range(6)],
+                    STATE_VEC_IDX_MAPPING["right_gripper_open"],
+
+                    *[STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(7)],
+                    STATE_VEC_IDX_MAPPING["left_eef_pos_x"],
+                    STATE_VEC_IDX_MAPPING["left_eef_pos_y"],
+                    STATE_VEC_IDX_MAPPING["left_eef_pos_z"],
+                    *[STATE_VEC_IDX_MAPPING[f"left_eef_angle_{i}"] for i in range(6)],
+                    STATE_VEC_IDX_MAPPING["left_gripper_open"],
                 ]
-                uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
+                assert values.shape[-1] == len(UNI_STATE_INDICES), \
+                    f"Expected {len(UNI_STATE_INDICES)} dims, got {values.shape[-1]}"
+
+                uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,), dtype=np.float32)
                 uni_vec[..., UNI_STATE_INDICES] = values
                 return uni_vec
+
+            def fill_in_action(values):
+                # values: (..., 20)
+                # right_pos(3) + right_rot6d(6) + right_gripper(1)
+                # left_pos(3)  + left_rot6d(6)  + left_gripper(1)
+
+                UNI_STATE_INDICES = [
+                    STATE_VEC_IDX_MAPPING["right_eef_pos_x"],
+                    STATE_VEC_IDX_MAPPING["right_eef_pos_y"],
+                    STATE_VEC_IDX_MAPPING["right_eef_pos_z"],
+                    *[STATE_VEC_IDX_MAPPING[f"right_eef_angle_{i}"] for i in range(6)],
+                    STATE_VEC_IDX_MAPPING["right_gripper_open"],
+
+                    STATE_VEC_IDX_MAPPING["left_eef_pos_x"],
+                    STATE_VEC_IDX_MAPPING["left_eef_pos_y"],
+                    STATE_VEC_IDX_MAPPING["left_eef_pos_z"],
+                    *[STATE_VEC_IDX_MAPPING[f"left_eef_angle_{i}"] for i in range(6)],
+                    STATE_VEC_IDX_MAPPING["left_gripper_open"],
+                ]
+                assert values.shape[-1] == len(UNI_STATE_INDICES), \
+                    f"Expected {len(UNI_STATE_INDICES)} dims, got {values.shape[-1]}"
+
+                uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,), dtype=np.float32)
+                uni_vec[..., UNI_STATE_INDICES] = values
+                return uni_vec
+
             state = fill_in_state(state)
             state_indicator = fill_in_state(np.ones_like(state_std))
             state_std = fill_in_state(state_std)
@@ -199,7 +242,7 @@ class HDF5VLADataset:
             state_norm = fill_in_state(state_norm)
             # If action's format is different from state's,
             # you may implement fill_in_action()
-            actions = fill_in_state(actions)
+            actions = fill_in_action(actions)
             
             # Parse the images
             def parse_img(key):

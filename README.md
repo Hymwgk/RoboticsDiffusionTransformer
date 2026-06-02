@@ -113,52 +113,153 @@ The following guides include the [installation](#installation), [fine-tuning](#f
    # ...
    ```
 
+## RDT 数据集结构解释，以hdf5数据集为例
+
+
+```
+rdt_js/                                       # 数据集名称
+├── episode_000/                              # 每个回合的单独文件夹
+│   ├── data.hdf5                             # 每个回合的数据文件
+│   └── expanded_instruction_gpt-4-turbo.json # 任务指令说明
+├── episode_001/
+│   ├── data.hdf5
+│   └── expanded_instruction_gpt-4-turbo.json
+```
+### 语言指令文件`expanded_instruction_gpt-4-turbo.json`内部结构
+```json
+{
+  "instruction": "...",              // 标准自然语言指令
+  "simplified_instruction": "...",   // 简化版自然语言指令
+  "expanded_instruction": "..."      // 详细版本
+}
+```
+例如
+```json
+{
+  "instruction": "Pick up the bandage and place it into the first aid kit.",
+  "simplified_instruction": "Put the bandage into the kit.",
+  "expanded_instruction": "Reach toward the bandage, grasp it securely, lift it from the table, move it over the first aid kit, and place it inside the kit."
+}
+```
+这三个版本的指令，在训练时会被随机采用，各1/3的概率。
+
+### data.hdf5 文件内部结构
+```
+/
+├── observations               
+│   ├── qpos                   # 关节角度
+│   └── images
+│       ├── cam_high           # 顶部相机
+│       ├── cam_left_wrist     # 左手腕相机
+│       └── cam_right_wrist    # 右手腕相机
+└── action  
+```
+其中数据格式为
+```
+observations/qpos: shape = (T, N)
+action:            shape = (T, N)
+```
+长度 T >= 128
+
+## Isaaclab 数据集转换至RDT转数据集格式
+首先确保Isaaclab数据集文件结构类似于
+```
+isaaclab_dataset/
+├── Get-place-Bandage-merged.hdf5    # 每个任务使用一个hdf5文件表示
+├── Mission-Abort-Estop.hdf5
+├── Set-Mode-Off.hdf5
+└── Sorting-Bullets.hdf5
+```
+每个 .hdf5 是一个任务，里面有多个 demo：
+```
+task.hdf5
+└── data
+    ├── demo_0                           # 回合0 
+    │   ├── obs                          # 观测空间
+    │   │   ├── eef_pos_left_b           # 左手末端执行器位置，相对于 机器人自身base坐标系 (T,3) dtype=float32
+    │   │   ├── eef_pos_left_w           # 左手末端执行器位置，相对于 世界world坐标系 (T,3) dtype=float32
+    │   │   ├── eef_pos_right_b          
+    │   │   ├── eef_pos_right_w          
+    │   │   ├── eef_quat_left_b          # 左手末端执行器姿态(四元数)，相对于 机器人自身base坐标系 (T,4) dtype=float32
+    │   │   ├── eef_quat_left_w          # 左手末端执行器姿态(四元数)，相对于 世界world坐标系 (T,4) dtype=float32
+    │   │   ├── eef_quat_right_b         
+    │   │   ├── eef_quat_right_w         
+    │   │   │
+    │   │   ├── gripper_left_pos         # 左手夹爪的位置/开合度 (T,2) dtype=float32
+    │   │   ├── gripper_right_pos        # 右手夹爪的位置/开合度 (T,2) dtype=float32
+    │   │   │
+    │   │   ├── joint_pos_left           # 左手绝对关节位置/角度 (T,9) dtype=float32
+    │   │   ├── joint_pos_left_rel       # 左手相对关节位置 (T,9) dtype=float32
+    │   │   ├── joint_pos_right          # 右手绝对关节位置/角度 (T,9) dtype=float32
+    │   │   ├── joint_pos_right_rel      # 右手相对关节位置 (T,9) dtype=float32
+    │   │   ├── joint_vel_left_rel       # 左手相对关节速度 (T,9) dtype=float32
+    │   │   ├── joint_vel_right_rel      # 右手相对关节速度 (T,9) dtype=float32
+    │   │   │
+    │   │   ├── gsmini_left_left_tactile_rgb   # 左手左侧视触觉相机的原始 RGB 图像 (T,180,240,3) dtype=float32
+    │   │   ├── gsmini_left_left_marker_motion # 左手左侧视触觉相机的 Marker 点特征运动向量 (T,2,99,2) dtype=float32
+    │   │   ├── gsmini_right_left_tactile_rgb  # 右手左侧视触觉相机的原始 RGB 图像 (T,180,240,3) dtype=float32
+    │   │   ├── gsmini_right_left_marker_motion# 右手左侧视触觉相机的 Marker 点特征运动向量 (T,2,99,2) dtype=float32
+    │   │   │
+    │   │   ├── zed_left                 # ZED双目相机左眼视角图像 (T,480,640,3) dtype=uint8
+    │   │   ├── zed_right                # ZED双目相机右眼视角图像 (T,480,640,3) dtype=uint8
+    │   │   ├── wrist_cam_left           # 左手腕部相机视角图像 (T,480,640,3) dtype=uint8
+    │   │   ├── wrist_cam_right          # 右手腕部相机视角图像 (T,480,640,3) dtype=uint8
+    │   │   └── table_cam                # 台面/全局视角固定相机图像 (T,480,640,3) dtype=uint8
+    │   │
+    │   └── actions                      # 动作空间：双臂控制目标输出 (T,16) dtype=float32 
+    │                                    # r_ee_pos(3) + r_quat_wxyz(4) + r_gripper(1) + l_ee_pos(3) + l_quat_wxyz(4) + l_gripper(1)
+    │                                    # 夹爪动作 r/l_gripper 范围[-1,1] 开1  闭-1
+    ├── demo_1                           # 回合1 (结构与 demo_0 完全一致)
+    └── demo_2                           # 回合2 ...
+```
+
+
+
 ## Fine-Tuning on Your Own Dataset
 
 If your fine-tuning dataset is in the [Open X-Embodiment](https://robotics-transformer-x.github.io/) or the collection of our pre-training datasets (see [this doc](docs/pretrain.md#download-and-prepare-datasets)), you can also fine-tune RDT through the pre-trained pipeline. You need to remove other redundant datasets in the parameters. We refer to [this guide](docs/pretrain.md) (pre-training).
 
-1. Prepare your dataset:
+1. 准备自己的数据集，以hdf5格式的数据集为例:
+   假如，数据集文件为`isaaclab.hdf5`, 先给这个数据集起一个名字例如 `rdt_js`.
+   将`isaaclab.hdf5`放在名为 `rdt_js`的文件夹下
 
-   You need to download your dataset to the disk and give it a name `my_cool_dataset`.
-
-   Then, you can link your dataset to the repo directory:
-
+   创建软链接:
    ```bash
-   # Under the root directory of this repo
+   # 在本项目根目录中设置文件夹
    cd data
    mkdir -p datasets
-   
-   # Link the downloaded dataset to this repo
-   ln -s /path/to/my_cool_dataset datasets/my_cool_dataset
+   # 创建软链接
+   ln -s /data/rdt_js   datasets/rdt_js
    ```
 
-2. Implement the dataset loader:
+2. 部署数据集加载器:
 
-   You need to:
 
-   1. Register the configuration of `my_cool_dataset`:
+   1. 对数据集 `rdt_js`进行配置:
 
-      Append the control frequency of `my_cool_dataset` in [this file](configs/dataset_control_freq.json). Write the name of `my_cool_dataset` in [this file](configs/finetune_datasets.json) and [this file](configs/finetune_sample_weights.json), where the value of the sampling weight doesn't matter since you only have one dataset. In these two files, we leave a placeholder of `agilex`; you can simply replace it with `my_cool_dataset`.
+      把自己的数据集 `rdt_js` 的控制频率写进 [这个文件里](configs/dataset_control_freq.json). 把数据集名称 `rdt_js` 写到 [这个文件里](configs/finetune_datasets.json) 以及 [这个文件里](configs/finetune_sample_weights.json), 如果只有一个微调用的数据集，采样权重 sampling weight 的数值无所谓不用管. 这两个文件中都有一个占位符 `agilex`; 把他们改为自己的数据集名称`rdt_js`就行.
 
-   2. Re-Implement the class of `HDF5VLADataset`:
+   2. 重新部署 `HDF5VLADataset`类:
 
-      You can find this class in [this file](data/hdf5_vla_dataset.py). In this file, we provide an example of loading the fine-tuning dataset used in our paper (see [this link](https://huggingface.co/datasets/robotics-diffusion-transformer/rdt-ft-data)).
+      在 [这个文件里](data/hdf5_vla_dataset.py)能够找到`HDF5VLADataset`这个类. 在该文件中，提供了论文中加载微调数据集的一个例子 (看[这个链接](https://huggingface.co/datasets/robotics-diffusion-transformer/rdt-ft-data)).
 
-      To adapt it to your dataset, you need to: (a) modify the `HDF5_DIR` (directory to `my_cool_dataset`) and `DATASET_NAME` (should be `"my_cool_dataset"`) in L21 and L22; (b) Implement the two functions of `parse_hdf5_file()` and `parse_hdf5_file_state_only()`. Please take a look at the original file for detailed comments and examples.
+      要想将这个类，改动用于自己的数据集，需要做以下几点改动: (a) 修改 `HDF5_DIR` (自己数据集路径`rdt_js`) 以及数据集名称`DATASET_NAME` (`"rdt_js"`) in L21 and L22; (b) 自行实现两个函数 `parse_hdf5_file()` and `parse_hdf5_file_state_only()`. 仔细看源代码和注释。
 
-      Note 1: Despite its name, you don't necessarily need to use HDF5 to store your data. Just make sure that the class is correctly implemented.
+      Note 1: 不是非要用HDF5文件来存储自己的数据集，只要保证数据集类是正常设置的就行了。
 
-      Note 2: During implementation, you may need to fill your robot action into the unified action vector (L180-194). Please refer to [this file](configs/state_vec.py) for an explanation of each element in the unified vector. We have reserved enough slots for each physical quantity. For example, we have reserved ten slots for joint angles. If your robot arm has six degrees of freedom, you only need to fill in the first six. 
+      Note 2: 在部署期间，需要将自己的机器人的动作设定为“统一动作空间”. 看[这个文件](configs/state_vec.py) (L180-194)有对统一动作空间的每个维度的具体含义解释.
+      We have reserved enough slots for each physical quantity. For example, we have reserved ten slots for joint angles. If your robot arm has six degrees of freedom, you only need to fill in the first six. 
 
-      **IMPORTANT 1:** If your robot is single-arm, please fill its action into the *right-arm* portion of the unified action vector, aligning with our pre-training datasets.
+      **要点 1:** 如果是单臂机械臂，需要将动作填到“右臂”的部分，而不是“左臂”对应的地方。If your robot is single-arm, please fill its action into the *right-arm* portion of the unified action vector, aligning with our pre-training datasets.
 
-      **IMPORTANT 2:** We use [6D representation](https://arxiv.org/pdf/1812.07035) for EEF rotation. If your action space contains EEF rotation (angle or quaternion), please refer to [this file](docs/test_6drot.py) for conversion. We note that this mapping is not reversible. Different Euler angles may be equivalent and correspond to the same 6D representation.
+      **要点 2:** 本项目使用的是 [6D representation](https://arxiv.org/pdf/1812.07035) 来表征末端执行器的旋转(EEF rotation). 
+      如果自己的机器人动作包含 末端执行器(EEF) 的旋转量（角度或四元数），需要参考 [这个文件](docs/test_6drot.py)进行转换. 其实就是说：多个欧拉角可能对应同一个真实旋转姿态，例如 [0,0,0] 和 [360,0,0]；正负号四元数也可能对应同一个真实旋转姿态，例如 [0,0,0,1] 和 [0,0,0,-1]。这导致对于网络而言，同一个物理姿态可能对应多个数值差异巨大的标签，从而增加学习难度。为了解决这一问题，我们希望采用一种与真实旋转姿态（SO(3)）保持一一对应关系的连续表征方式，从而消除这种参数化带来的歧义性，使网络学习更加稳定。
 
-      **IMPORTANT 3:** No physical quantities (except the gripper width) are normalized during pre-training. This can preserve each physical quantity's meaning, thereby promoting generalization across robots. Therefore, we encourage you not to normalize any physical quantities but to choose appropriate units for them. Generally, we use the International System of Units, which ensures that most values fall within [-1,1]. As an exception, we perform min-max normalization on the gripper width to [0,1].
+      **要点 3:** 在预训练期间，训练脚本里没有对动作/物理量（除了夹具宽度）进行归一化。这样做保留了每个物理量的含义，促进了机器人之间的泛化。因此，建议不要标准化任何物理量，而是为它们选择合适的单位。通常，我们使用国际单位制，这可确保大多数值落在 [-1,1] 范围内。作为例外，本项目将夹具宽度执行最小-最大标准化为 [0,1]。
 
-      **IMPORTANT 4:** If you use RTX 4090 (or lower), the GPU memory may be too low to load the `t5-v1_1-xxl` encoder. Instead, we recommend you precompute the language embeddings (see [this file](scripts/encode_lang_batch.py) for an example script) and load them during training. In this way, you need to specify the path to the embeddings in the `HDF5VLADataset` (see L148) rather than the natural language.
+      **IMPORTANT 4:** 4090 GPU的显存可能无法加载 `t5-v1_1-xxl` 编码器. 建议先去单独计算语言指令的编码(看 [这个文件](scripts/encode_lang_batch.py)有例子) 然后在微调时候加载语言编码. 这样做的话就得在 `HDF5VLADataset` (see L148) 中加载刚预编码好的语言指令的embedding，而不是输入自然语言。
 
-   3. Compute the dataset statistics information for `my_cool_dataset`:
+   3. 计算数据集 `my_cool_dataset`的统计量的方法:
 
       ```bash
       # Under the root directory of this repo
@@ -166,11 +267,11 @@ If your fine-tuning dataset is in the [Open X-Embodiment](https://robotics-trans
       python -m data.compute_dataset_stat_hdf5
       ```
 
-3. Start fine-tuning:
+3. 开始微调:
+   模型架构和数据处理相关的配置位于[此文件](configs/base.yaml)中。通常情况下，无需修改​​这些配置；否则，加载预训练检查点时会出错。训练相关的配置通过*命令行参数*传递。使用`python main.py -h`查看配置说明。我们在[此文件](finetune.sh)中提供了一个微调脚本示例(`finetune.sh`)。可能需要修改此文件中的一些参数，例如`CUTLASS_PATH`和`WANDB_PROJECT`。
 
-   Configurations relevant to model architecture and data processing are in [this file](configs/base.yaml). Normally, you do not need to modify these configurations; otherwise, it will cause errors in loading the pre-training checkpoint. Configurations relevant to training are passed through *Command Line Arguments*. Use `python main.py -h ` to see the descriptions. We provide an example of a fine-tuning script in [this file](finetune.sh) (`finetune.sh`). You may need to modify some of the parameters in this file, such as `CUTLASS_PATH` and `WANDB_PROJECT`.
 
-   Use this to start fine-tuning:
+   使用该指令开始微调:
 
    ```bash
    source finetune.sh
@@ -202,9 +303,9 @@ If your fine-tuning dataset is in the [Open X-Embodiment](https://robotics-trans
          --report_to=wandb
    ```
 
-   **IMPORTANT**: If you have already chosen to precompute the language embeddings, please specify `--precomp_lang_embed` in the `finetune.sh`.
+   **IMPORTANT**: 如果已经选择使用预先编码的语言embedding来当作语言指令，那么就要在`finetune.sh`中对`--precomp_lang_embed` 进行指定.
 
-   Note 1: `pretrained_model_name_or_path` can one of:
+   Note 1:如何导入预训练的RDT参数， `pretrained_model_name_or_path` can one of:
 
       - a string, the *model id* of a pre-trained model hosted inside a model repo on HuggingFace. Please fill with `"robotics-diffusion-transformer/rdt-1b"`, which is the officially-released [RDT-1B model](https://huggingface.co/robotics-diffusion-transformer/rdt-1b)🤗 at HuggingFace. (recommended)
       - a string, the path to a *directory* containing the manually downloaded model weights from HuggingFace, e.g., `"/path/to/rdt-1b"`. You should first manually download the `rdt-1b` directory from this [link](https://huggingface.co/robotics-diffusion-transformer/rdt-1b)🤗.
@@ -216,9 +317,9 @@ If your fine-tuning dataset is in the [Open X-Embodiment](https://robotics-trans
 
    Note 2: You can monitor the training process by observing `loss` (through a long window moving average) and `overall_avg_sample_mse` in [Wandb](https://wandb.ai/site) or [TensorBoard](https://www.tensorflow.org/tensorboard). We empirically found that the lower the `overall_avg_sample_mse`, the better the model performs. Usually, fine-tuning is over when this value converges.
 
-   Note 3: If the training oscillates, you can increase the batch size by adding more GPUs or setting a larger `--gradient_accumulation_steps`.
+   Note 3: 如果训练出现波动，可以通过添加更多 GPU 或设置更大的 `--gradient_accumulation_steps` 来增加批次大小。
 
-   Note 4: Please specify `--load_from_hdf5` in your script when finetuning with an HDF5 dataset.
+   Note 4: 在使用hdf5格式数据集进行微调时，需要指定 `--load_from_hdf5` 参数.
 
 ## Deployment on Real-Robots
 

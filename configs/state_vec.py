@@ -1,36 +1,26 @@
 STATE_VEC_IDX_MAPPING = {
     # [0, 10): right arm joint positions
-    **{
-        'arm_joint_{}_pos'.format(i): i for i in range(10)
-    },
-    **{
-        'right_arm_joint_{}_pos'.format(i): i for i in range(10)
-    },
+    **{'arm_joint_{}_pos'.format(i): i for i in range(10)},  # 别名，和 right_arm_joint_{}_pos 指向同一组数据，用于兼容单臂机械臂
+    **{'right_arm_joint_{}_pos'.format(i): i for i in range(10)},
+    
     # [10, 15): right gripper joint positions
-    **{
-        'gripper_joint_{}_pos'.format(i): i + 10 for i in range(5)
-    },
-    **{
-        'right_gripper_joint_{}_pos'.format(i): i + 10 for i in range(5)
-    },
+    **{'gripper_joint_{}_pos'.format(i): i + 10 for i in range(5)},
+    **{'right_gripper_joint_{}_pos'.format(i): i + 10 for i in range(5)},
+
     'gripper_open': 10, # alias of right_gripper_joint_0_pos
     'right_gripper_open': 10,
+
     # [15, 25): right arm joint velocities
-    **{
-        'arm_joint_{}_vel'.format(i): i + 15 for i in range(10)
-    },
-    **{
-        'right_arm_joint_{}_vel'.format(i): i + 15 for i in range(10)
-    },
+    **{'arm_joint_{}_vel'.format(i): i + 15 for i in range(10)},
+    **{'right_arm_joint_{}_vel'.format(i): i + 15 for i in range(10)},
+
     # [25, 30): right gripper joint velocities
-    **{
-        'gripper_joint_{}_vel'.format(i): i + 25 for i in range(5)
-    },
-    **{
-        'right_gripper_joint_{}_vel'.format(i): i + 25 for i in range(5)
-    },
+    **{'gripper_joint_{}_vel'.format(i): i + 25 for i in range(5)},
+    **{'right_gripper_joint_{}_vel'.format(i): i + 25 for i in range(5)},
+
     'gripper_open_vel': 25, # alias of right_gripper_joint_0_vel
     'right_gripper_open_vel': 25,
+
     # [30, 33): right end effector positions
     'eef_pos_x': 30,
     'right_eef_pos_x': 30,
@@ -66,6 +56,9 @@ STATE_VEC_IDX_MAPPING = {
     'eef_angular_vel_yaw': 44,
     'right_eef_angular_vel_yaw': 44,
     # [45, 50): reserved 
+
+
+
     # [50, 60): left arm joint positions
     **{
         'left_arm_joint_{}_pos'.format(i): i + 50 for i in range(10)
@@ -104,6 +97,10 @@ STATE_VEC_IDX_MAPPING = {
     'left_eef_angular_vel_pitch': 93,
     'left_eef_angular_vel_yaw': 94,
     # [95, 100): reserved
+
+
+
+
     # [100, 102): base linear velocities
     'base_vel_x': 100,
     'base_vel_y': 101,
