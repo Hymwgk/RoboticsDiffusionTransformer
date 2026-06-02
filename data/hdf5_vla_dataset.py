@@ -133,7 +133,7 @@ class HDF5VLADataset:
             else:
                 raise ValueError("Found no qpos that exceeds the threshold.")
             
-            # 随机采样一个时间步，作为起始，要求至少有CHUNK_SIZE的动作可以用来预测
+            # 随机采样一个时间步，作为起始
             step_id = np.random.randint(first_idx-1, num_steps)
             
             # 读取语言指令
@@ -291,72 +291,79 @@ class HDF5VLADataset:
             }
 
     def parse_hdf5_file_state_only(self, file_path):
-        """[Modify] Parse a hdf5 file to generate a state trajectory.
-
-        Args:
-            file_path (str): the path to the hdf5 file
-        
-        Returns:
-            valid (bool): whether the episode is valid, which is useful for filtering.
-                If False, this episode will be dropped.
-            dict: a dictionary containing the training sample,
-                {
-                    "state": ndarray,           # state[:], (T, STATE_DIM).
-                    "action": ndarray,          # action[:], (T, STATE_DIM).
-                } or None if the episode is invalid.
-        """
         with h5py.File(file_path, 'r') as f:
-            qpos = f['observations']['qpos'][:]
+            qpos = f['observations']['qpos'][:].astype(np.float32)
+            action_all = f['action'][:].astype(np.float32)
+
             num_steps = qpos.shape[0]
-            # [Optional] We drop too-short episode
             if num_steps < 128:
                 return False, None
-            
-            # [Optional] We skip the first few still steps
+
             EPS = 1e-2
-            # Get the idx of the first qpos whose delta exceeds the threshold
             qpos_delta = np.abs(qpos - qpos[0:1])
             indices = np.where(np.any(qpos_delta > EPS, axis=1))[0]
             if len(indices) > 0:
                 first_idx = indices[0]
             else:
                 raise ValueError("Found no qpos that exceeds the threshold.")
-            
-            # Rescale gripper to [0, 1]
-            qpos = qpos / np.array(
-               [[1, 1, 1, 1, 1, 1, 4.7908, 1, 1, 1, 1, 1, 1, 4.7888]] 
-            )
-            target_qpos = f['action'][:] / np.array(
-               [[1, 1, 1, 1, 1, 1, 11.8997, 1, 1, 1, 1, 1, 1, 13.9231]] 
-            )
-            
-            # Parse the state and action
-            state = qpos[first_idx-1:]
-            action = target_qpos[first_idx-1:]
-            
-            # Fill the state/action into the unified vector
+
+            state = qpos[first_idx - 1:]
+            action = action_all[first_idx - 1:]
+
             def fill_in_state(values):
-                # Target indices corresponding to your state space
-                # In this example: 6 joints + 1 gripper for each arm
+                # values: (..., 34)
                 UNI_STATE_INDICES = [
-                    STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(6)
-                ] + [
-                    STATE_VEC_IDX_MAPPING["left_gripper_open"]
-                ] + [
-                    STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(6)
-                ] + [
-                    STATE_VEC_IDX_MAPPING["right_gripper_open"]
+                    *[STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(7)],
+                    STATE_VEC_IDX_MAPPING["right_eef_pos_x"],
+                    STATE_VEC_IDX_MAPPING["right_eef_pos_y"],
+                    STATE_VEC_IDX_MAPPING["right_eef_pos_z"],
+                    *[STATE_VEC_IDX_MAPPING[f"right_eef_angle_{i}"] for i in range(6)],
+                    STATE_VEC_IDX_MAPPING["right_gripper_open"],
+
+                    *[STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(7)],
+                    STATE_VEC_IDX_MAPPING["left_eef_pos_x"],
+                    STATE_VEC_IDX_MAPPING["left_eef_pos_y"],
+                    STATE_VEC_IDX_MAPPING["left_eef_pos_z"],
+                    *[STATE_VEC_IDX_MAPPING[f"left_eef_angle_{i}"] for i in range(6)],
+                    STATE_VEC_IDX_MAPPING["left_gripper_open"],
                 ]
-                uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,))
+
+                assert values.shape[-1] == len(UNI_STATE_INDICES), \
+                    f"Expected {len(UNI_STATE_INDICES)} dims, got {values.shape[-1]}"
+
+                uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,), dtype=np.float32)
                 uni_vec[..., UNI_STATE_INDICES] = values
                 return uni_vec
+
+            def fill_in_action(values):
+                # values: (..., 20)
+                UNI_STATE_INDICES = [
+                    STATE_VEC_IDX_MAPPING["right_eef_pos_x"],
+                    STATE_VEC_IDX_MAPPING["right_eef_pos_y"],
+                    STATE_VEC_IDX_MAPPING["right_eef_pos_z"],
+                    *[STATE_VEC_IDX_MAPPING[f"right_eef_angle_{i}"] for i in range(6)],
+                    STATE_VEC_IDX_MAPPING["right_gripper_open"],
+
+                    STATE_VEC_IDX_MAPPING["left_eef_pos_x"],
+                    STATE_VEC_IDX_MAPPING["left_eef_pos_y"],
+                    STATE_VEC_IDX_MAPPING["left_eef_pos_z"],
+                    *[STATE_VEC_IDX_MAPPING[f"left_eef_angle_{i}"] for i in range(6)],
+                    STATE_VEC_IDX_MAPPING["left_gripper_open"],
+                ]
+
+                assert values.shape[-1] == len(UNI_STATE_INDICES), \
+                    f"Expected {len(UNI_STATE_INDICES)} dims, got {values.shape[-1]}"
+
+                uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,), dtype=np.float32)
+                uni_vec[..., UNI_STATE_INDICES] = values
+                return uni_vec
+
             state = fill_in_state(state)
-            action = fill_in_state(action)
-            
-            # Return the resulting sample
+            action = fill_in_action(action)
+
             return True, {
                 "state": state,
-                "action": action
+                "action": action,
             }
 
 if __name__ == "__main__":

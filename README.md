@@ -162,9 +162,9 @@ action:            shape = (T, N)
 长度 T >= 128
 
 ## Isaaclab 数据集转换至RDT转数据集格式
-首先确保Isaaclab数据集文件结构类似于
+假设Isaaclab数据集文件夹为`/data/isaaclab_js`，确保其文件结构类似于
 ```
-isaaclab_dataset/
+isaaclab_js/
 ├── Get-place-Bandage-merged.hdf5    # 每个任务使用一个hdf5文件表示
 ├── Mission-Abort-Estop.hdf5
 ├── Set-Mode-Off.hdf5
@@ -212,6 +212,13 @@ task.hdf5
     ├── demo_1                           # 回合1 (结构与 demo_0 完全一致)
     └── demo_2                           # 回合2 ...
 ```
+运行转换指令，将isaaclab数据集转换为  rdt 数据集
+```bash
+cd ./data
+python isaaclab_to_rdt.py  --input-root /data/isaaclab_js  --output-root /data/rdt_js
+```
+
+
 
 
 
@@ -220,9 +227,8 @@ task.hdf5
 If your fine-tuning dataset is in the [Open X-Embodiment](https://robotics-transformer-x.github.io/) or the collection of our pre-training datasets (see [this doc](docs/pretrain.md#download-and-prepare-datasets)), you can also fine-tune RDT through the pre-trained pipeline. You need to remove other redundant datasets in the parameters. We refer to [this guide](docs/pretrain.md) (pre-training).
 
 1. 准备自己的数据集，以hdf5格式的数据集为例:
-   假如，数据集文件为`isaaclab.hdf5`, 先给这个数据集起一个名字例如 `rdt_js`.
-   将`isaaclab.hdf5`放在名为 `rdt_js`的文件夹下
-
+   经过上述转换得到rdt结构的数据集`/data/rdt_js`
+   
    创建软链接:
    ```bash
    # 在本项目根目录中设置文件夹
