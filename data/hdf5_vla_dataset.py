@@ -137,20 +137,25 @@ class HDF5VLADataset:
             step_id = np.random.randint(first_idx-1, num_steps)
             
             # 读取语言指令
-            dir_path = os.path.dirname(file_path)
-            with open(os.path.join(dir_path, 'expanded_instruction_gpt-4-turbo.json'), 'r') as f_instr:
-                instruction_dict = json.load(f_instr)
-            # We have 1/3 prob to use original instruction,
-            # 1/3 to use simplified instruction,
-            # and 1/3 to use expanded instruction.
-            instruction_type = np.random.choice([
-                'instruction', 'simplified_instruction', 'expanded_instruction'])
-            instruction = instruction_dict[instruction_type]
-            if isinstance(instruction, list):
-                instruction = np.random.choice(instruction)
+            # dir_path = os.path.dirname(file_path)
+            # with open(os.path.join(dir_path, 'expanded_instruction_gpt-4-turbo.json'), 'r') as f_instr:
+            #     instruction_dict = json.load(f_instr)
+            # # We have 1/3 prob to use original instruction,
+            # # 1/3 to use simplified instruction,
+            # # and 1/3 to use expanded instruction.
+            # instruction_type = np.random.choice([
+            #     'instruction', 'simplified_instruction', 'expanded_instruction'])
+            # instruction = instruction_dict[instruction_type]
+            # if isinstance(instruction, list):
+            #     instruction = np.random.choice(instruction)
             # You can also use precomputed language embeddings (recommended)
             # instruction = "path/to/lang_embed.pt"
-            
+
+            # 这里直接使用预编码的语言指令embedding文件，避免在训练过程中重复计算语言指令的编码
+            dir_path = os.path.dirname(file_path)
+            embed_id = np.random.randint(0, 3)
+            instruction = os.path.join(dir_path, f"lang_embed_{embed_id}.pt")
+
             # Assemble the meta
             meta = {
                 "dataset_name": self.DATASET_NAME,
@@ -209,7 +214,8 @@ class HDF5VLADataset:
                 uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,), dtype=np.float32)
                 uni_vec[..., UNI_STATE_INDICES] = values
                 return uni_vec
-
+            
+            # 将动作也填充到统一的向量空间中
             def fill_in_action(values):
                 # values: (..., 20)
                 # right_pos(3) + right_rot6d(6) + right_gripper(1)

@@ -51,13 +51,7 @@ from scipy.spatial.transform import Rotation as R
 LEFT_GRIPPER_MAX = 0.04
 RIGHT_GRIPPER_MAX = 0.04
 
-# 设置指令
-DEFAULT_INSTRUCTIONS = {
-    "Get-place-Bandage": "Pick up the bandage and place it into the first aid kit.",
-    "Mission-Abort-Estop": "Press the emergency stop button to abort the mission.",
-    "Set-Mode-Off": "Turn the mode switch to the OFF position.",
-    "Sorting-Bullets": "Sort the bullets into the correct locations.",
-}
+
 # 相机字段映射：isaaclab数据集 obs 中的字段 -> 输出 data.hdf5 中的字段
 CAMERA_MAPPING= {
     "cam_high": "zed_left",
@@ -107,12 +101,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def infer_instruction_payload(task_stem: str) -> dict[str, str]:
+def infer_instruction_payload(task_stem: str, instructions: dict[str, dict[str, str]]) -> dict[str, str]:
     """根据任务文件名task_stem, 自动生成一份语言指令 JSON 内容"""
     canonical_stem = task_stem.removesuffix("-merged")
 
-    if canonical_stem in DEFAULT_INSTRUCTIONS:
-        instruction = DEFAULT_INSTRUCTIONS[canonical_stem]
+    if canonical_stem in instructions:
+        instruction = instructions[canonical_stem]['instruction']
     else:
         instruction = canonical_stem.replace("-", " ").replace("_", " ").strip()
         instruction = " ".join(instruction.split())
@@ -316,7 +310,7 @@ def build_qpos_from_obs(obs: h5py.Group) -> np.ndarray:
     # TODO 确定一下isaaclab数据集四元数顺序wxyz
     right_rot6d = quat_wxyz_to_rot6d(obs["eef_quat_right_b"])
     left_rot6d = quat_wxyz_to_rot6d(obs["eef_quat_left_b"])
-
+    # 不一定是0/1  但是归一化到0~1
     right_gripper = reduce_gripper(obs["gripper_right_pos"], RIGHT_GRIPPER_MAX)
     left_gripper = reduce_gripper(obs["gripper_left_pos"], LEFT_GRIPPER_MAX)
 
@@ -436,6 +430,7 @@ def convert_all(
     *,
     input_root: Path,
     output_root: Path,
+    instructions: dict[str, str],
     dataset_name: str,
     overwrite: bool,
     max_demos_per_task: int | None,
@@ -454,7 +449,7 @@ def convert_all(
     for source_path in source_files:
         task_stem = source_path.stem
         # 根据任务名称自动生成语言指令内容
-        instruction_payload = infer_instruction_payload(task_stem)
+        instruction_payload = infer_instruction_payload(task_stem, instructions)
 
         written = 0
         skipped = 0
@@ -501,10 +496,15 @@ def convert_all(
 
 def main() -> None:
     args = parse_args()
-
+    # 获取语言指令路径
+    instructions_path = Path(args.input_root) / "Instructions.json"
+    with open(instructions_path, "r") as f:
+        instructions = json.load(f)
+    # 
     convert_all(
         input_root=args.input_root,
         output_root=args.output_root,
+        instructions=instructions, 
         dataset_name=args.dataset_name,
         overwrite=args.overwrite,
         max_demos_per_task=args.max_demos_per_task,

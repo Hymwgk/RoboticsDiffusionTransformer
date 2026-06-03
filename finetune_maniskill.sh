@@ -1,7 +1,8 @@
 # 适合单机训练
 export NCCL_IB_HCA=mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_7:1,mlx5_8:1,mlx5_9:1
-export NCCL_IB_DISABLE=0
-export NCCL_SOCKET_IFNAME=bond0
+export NCCL_IB_DISABLE=1
+# 设置为本地回环接口，避免NCCL尝试使用其他网络接口进行通信，这在单机训练时是合适的
+export NCCL_SOCKET_IFNAME=lo   
 export NCCL_DEBUG=INFO
 export NCCL_NVLS_ENABLE=0
 # 添加公共huggingface缓存路径环境变量
@@ -16,7 +17,7 @@ export OUTPUT_DIR="/model/wgk/checkpoints/rdt-finetune-1b-sim"
 # 默认不管
 export CFLAGS="-I/usr/include"
 export LDFLAGS="-L/usr/lib/x86_64-linux-gnu"
-export CUTLASS_PATH="/data/lingxuan/cutlass"
+export CUTLASS_PATH="./data/cutlass"
 # 设置wandb的项目名称和离线模式，确保训练日志能够正确记录到指定项目中，并且避免wandb尝试连接服务器
 export WANDB_PROJECT="robotic_diffusion_transformer"
 export WANDB_MODE=offline
@@ -33,14 +34,16 @@ fi
 #     --deepspeed="./configs/zero2.json" \
 #     ...
 
-accelerate launch main.py \
+accelerate launch --num_processes=1  main.py \
     --deepspeed="./configs/zero2.json" \
     --pretrained_model_name_or_path="robotics-diffusion-transformer/rdt-1b" \
     --pretrained_text_encoder_name_or_path=$TEXT_ENCODER_NAME \
     --pretrained_vision_encoder_name_or_path=$VISION_ENCODER_NAME \
+    --precomp_lang_embed \
     --output_dir=$OUTPUT_DIR \
-    --train_batch_size=24 \
-    --sample_batch_size=32 \
+    --train_batch_size=1 \
+    --sample_batch_size=1 \
+    --gradient_accumulation_steps=24 \
     --max_train_steps=400000 \
     --checkpointing_period=10000 \
     --sample_period=500 \
@@ -48,7 +51,7 @@ accelerate launch main.py \
     --lr_scheduler="constant" \
     --learning_rate=1e-4 \
     --mixed_precision="bf16" \
-    --dataloader_num_workers=8 \
+    --dataloader_num_workers=4 \
     --image_aug \
     --dataset_type="finetune" \
     --state_noise_snr=40 \

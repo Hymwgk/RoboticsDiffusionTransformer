@@ -49,9 +49,6 @@ The following guides include the [installation](#installation), [fine-tuning](#f
     wget https://github.com/Dao-AILab/flash-attention/releases/download/v2.2.2/flash_attn-2.2.2+cu121torch2.1cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 
     pip install flash_attn-2.2.2+cu121torch2.1cxx11abiFALSE-cp310-cp310-linux_x86_64.whl 
-
-
-
     ```
 
 2. Download off-the-shelf multi-modal encoders:
@@ -147,12 +144,12 @@ rdt_js/                                       # 数据集名称
 ```
 /
 ├── observations               
-│   ├── qpos                   # 关节角度
+│   ├── qpos                   # 128维度统一空间
 │   └── images
 │       ├── cam_high           # 顶部相机
 │       ├── cam_left_wrist     # 左手腕相机
 │       └── cam_right_wrist    # 右手腕相机
-└── action  
+└── action                     # 128维度统一空间
 ```
 其中数据格式为
 ```
@@ -161,16 +158,25 @@ action:            shape = (T, N)
 ```
 长度 T >= 128
 
-## Isaaclab 数据集转换至RDT转数据集格式
+
+
+RDT数据集的末端位置姿态，的参考坐标系是 base 还是 world ?
+
+
+
+## Isaaclab 数据集结构与准备
+
+### 调整Isaaclab数据集
 假设Isaaclab数据集文件夹为`/data/isaaclab_js`，确保其文件结构类似于
 ```
 isaaclab_js/
 ├── Get-place-Bandage-merged.hdf5    # 每个任务使用一个hdf5文件表示
 ├── Mission-Abort-Estop.hdf5
 ├── Set-Mode-Off.hdf5
-└── Sorting-Bullets.hdf5
+├── Sorting-Bullets.hdf5
+└── Instructions.json
 ```
-每个 .hdf5 是一个任务，里面有多个 demo：
+每个 .hdf5 是一个任务，hdf5内部对应多个 demo（每个回合对应一个demo）：
 ```
 task.hdf5
 └── data
@@ -206,23 +212,84 @@ task.hdf5
     │   │   ├── wrist_cam_right          # 右手腕部相机视角图像 (T,480,640,3) dtype=uint8
     │   │   └── table_cam                # 台面/全局视角固定相机图像 (T,480,640,3) dtype=uint8
     │   │
-    │   └── actions                      # 动作空间：双臂控制目标输出 (T,16) dtype=float32 
+    │   └── actions                      # 动作空间：双臂控制目标输出 (T,16) dtype=float32 TODO：action似乎并没有用控制量，检查一下
     │                                    # r_ee_pos(3) + r_quat_wxyz(4) + r_gripper(1) + l_ee_pos(3) + l_quat_wxyz(4) + l_gripper(1)
     │                                    # 夹爪动作 r/l_gripper 范围[-1,1] 开1  闭-1
     ├── demo_1                           # 回合1 (结构与 demo_0 完全一致)
     └── demo_2                           # 回合2 ...
 ```
+`Instruction.json`文件中存放对应的语言指令，为字典格式：
+```json
+{
+    "Get-place-Bandage": {
+        "instruction": "Pick up the bandage and place it into the first aid kit."
+    },
+
+    "Mission-Abort-Estop": {
+        "instruction": "Press the emergency stop button to abort the mission."
+    },
+
+    "Set-Mode-Off": {
+        "instruction": "Turn the mode switch to the OFF position."
+    },
+
+    "Sorting-Bullets": {
+        "instruction": "Sort the bullets into the correct locations."
+    }
+}
+```
+其中，外层字典的key需要与任务的hdf5的名称相对应
+
+
+### 转换至RDT转数据集格式
 运行转换指令，将isaaclab数据集转换为  rdt 数据集
 ```bash
 cd ./data
 python isaaclab_to_rdt.py  --input-root /data/isaaclab_js  --output-root /data/rdt_js
 ```
+检查rdt_js文件夹结构是否如
+```bash
+rdt_js/
+├── episode_000/
+│   ├── data.hdf5
+│   └── expanded_instruction_gpt-4-turbo.json
+├── episode_001/
+│   ├── data.hdf5
+│   └── expanded_instruction_gpt-4-turbo.json
+```
 
 
 
+### 对转换后的数据集进行 语言指令预编码
 
 
-## Fine-Tuning on Your Own Dataset
+修改`RoboticsDiffusionTransformer/scripts/encode_lang_batch.py`中的`TARGET_DIR = "/data/rdt_js"`
+```python
+cd  RoboticsDiffusionTransformer/
+python -m scripts.encode_lang_batch
+```
+
+转换后，将向TARGET_DIR数据集文件夹中，添加预编码的embedding文件，查看预编码后的结构为
+```bash
+rdt_js/
+├── episode_000/
+│   ├── data.hdf5
+│   ├── expanded_instruction_gpt-4-turbo.json
+│   ├── lang_embed_0.pt  # 标准指令预编码embedding  
+│   ├── lang_embed_1.pt  # 简化指令预编码embedding 
+│   └── lang_embed_2.pt  # 扩展指令预编码embedding 
+│
+├── episode_001/
+│   ├── data.hdf5
+│   ├── expanded_instruction_gpt-4-turbo.json
+│   ├── lang_embed_0.pt
+│   ├── lang_embed_1.pt
+│   └── lang_embed_2.pt
+```
+
+
+
+### 使用自己的数据集进行微调
 
 If your fine-tuning dataset is in the [Open X-Embodiment](https://robotics-transformer-x.github.io/) or the collection of our pre-training datasets (see [this doc](docs/pretrain.md#download-and-prepare-datasets)), you can also fine-tune RDT through the pre-trained pipeline. You need to remove other redundant datasets in the parameters. We refer to [this guide](docs/pretrain.md) (pre-training).
 
@@ -238,14 +305,22 @@ If your fine-tuning dataset is in the [Open X-Embodiment](https://robotics-trans
    ln -s /data/rdt_js   datasets/rdt_js
    ```
 
-2. 部署数据集加载器:
+2. 计算转换后的rdt数据集统计量
+   ```bash
+   # Under the root directory of this repo
+   # Use -h to see the full usage
+   python -m data.compute_dataset_stat_hdf5
+   ```
 
 
-   1. 对数据集 `rdt_js`进行配置:
+3. 部署数据集加载器:
+
+
+   i. 对数据集 `rdt_js`进行配置:
 
       把自己的数据集 `rdt_js` 的控制频率写进 [这个文件里](configs/dataset_control_freq.json). 把数据集名称 `rdt_js` 写到 [这个文件里](configs/finetune_datasets.json) 以及 [这个文件里](configs/finetune_sample_weights.json), 如果只有一个微调用的数据集，采样权重 sampling weight 的数值无所谓不用管. 这两个文件中都有一个占位符 `agilex`; 把他们改为自己的数据集名称`rdt_js`就行.
 
-   2. 重新部署 `HDF5VLADataset`类:
+   ii. 重新部署 `HDF5VLADataset`类:
 
       在 [这个文件里](data/hdf5_vla_dataset.py)能够找到`HDF5VLADataset`这个类. 在该文件中，提供了论文中加载微调数据集的一个例子 (看[这个链接](https://huggingface.co/datasets/robotics-diffusion-transformer/rdt-ft-data)).
 
@@ -263,25 +338,51 @@ If your fine-tuning dataset is in the [Open X-Embodiment](https://robotics-trans
 
       **要点 3:** 在预训练期间，训练脚本里没有对动作/物理量（除了夹具宽度）进行归一化。这样做保留了每个物理量的含义，促进了机器人之间的泛化。因此，建议不要标准化任何物理量，而是为它们选择合适的单位。通常，我们使用国际单位制，这可确保大多数值落在 [-1,1] 范围内。作为例外，本项目将夹具宽度执行最小-最大标准化为 [0,1]。
 
-      **IMPORTANT 4:** 4090 GPU的显存可能无法加载 `t5-v1_1-xxl` 编码器. 建议先去单独计算语言指令的编码(看 [这个文件](scripts/encode_lang_batch.py)有例子) 然后在微调时候加载语言编码. 这样做的话就得在 `HDF5VLADataset` (see L148) 中加载刚预编码好的语言指令的embedding，而不是输入自然语言。
+      **要点 4:** 4090 GPU的显存可能无法加载 `t5-v1_1-xxl` 编码器. 建议先去单独计算语言指令的编码(看 [这个文件](scripts/encode_lang_batch.py)有例子) 然后在微调时候加载语言编码. 这样做的话就得在 `HDF5VLADataset` (see L148) 中加载刚预编码好的语言指令的embedding，而不是输入自然语言。
 
-   3. 计算数据集 `my_cool_dataset`的统计量的方法:
 
-      ```bash
-      # Under the root directory of this repo
-      # Use -h to see the full usage
-      python -m data.compute_dataset_stat_hdf5
-      ```
 
-3. 开始微调:
+
+4. 开始微调:
    模型架构和数据处理相关的配置位于[此文件](configs/base.yaml)中。通常情况下，无需修改​​这些配置；否则，加载预训练检查点时会出错。训练相关的配置通过*命令行参数*传递。使用`python main.py -h`查看配置说明。我们在[此文件](finetune.sh)中提供了一个微调脚本示例(`finetune.sh`)。可能需要修改此文件中的一些参数，例如`CUTLASS_PATH`和`WANDB_PROJECT`。
 
 
    使用该指令开始微调:
 
    ```bash
+   # 这是多卡
    source finetune.sh
+   # 这是单卡
+   source finetune_maniskill.sh
    ```
+
+  ```bash
+   accelerate launch --num_processes=1  main.py \    # 单卡
+    --deepspeed="./configs/zero2.json" \
+    --pretrained_model_name_or_path="robotics-diffusion-transformer/rdt-1b" \
+    --pretrained_text_encoder_name_or_path=$TEXT_ENCODER_NAME \
+    --pretrained_vision_encoder_name_or_path=$VISION_ENCODER_NAME \
+    --precomp_lang_embed \
+    --output_dir=$OUTPUT_DIR \
+    --train_batch_size=1 \       # 批次大小
+    --sample_batch_size=1 \      # 训练时进行验证的样本采样大小 
+    --gradient_accumulation_steps=24 \  # 对梯度进行累积，等效为train_batch_size*gradient_accumulation_steps的batch size
+    --max_train_steps=400000 \   # 训练步数，优先级高于 num_train_epochs
+    --checkpointing_period=10000 \
+    --sample_period=500 \
+    --checkpoints_total_limit=40 \
+    --lr_scheduler="constant" \
+    --learning_rate=1e-4 \
+    --mixed_precision="bf16" \
+    --dataloader_num_workers=4 \
+    --image_aug \
+    --dataset_type="finetune" \
+    --state_noise_snr=40 \
+    --load_from_hdf5 \
+    --report_to=wandb
+   ```
+
+
 
    with `finetune.sh` detailed as below:
 

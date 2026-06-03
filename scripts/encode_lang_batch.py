@@ -8,48 +8,73 @@ from tqdm import tqdm
 from models.multimodal_encoder.t5_encoder import T5Embedder
 
 
-GPU = 0
+
+GPU = 1
 MODEL_PATH = "google/t5-v1_1-xxl"
 CONFIG_PATH = "configs/base.yaml"
-# Modify the TARGET_DIR to your dataset path
-TARGET_DIR = "data/datasets/agilex/tfrecords/"
+# rdt格式的数据集路径
+TARGET_DIR = "/data/rdt_js"
 
 # Note: if your GPU VRAM is less than 24GB, 
 # it is recommended to enable offloading by specifying an offload directory.
-OFFLOAD_DIR = None  # Specify your offload directory here, ensuring the directory exists.
+OFFLOAD_DIR = None #"/data/t5_offload"  # Specify your offload directory here, ensuring the directory exists.
+
+def as_list(x):
+    if isinstance(x, list):
+        return x
+    if isinstance(x, str):
+        return [x]
+    return []
 
 def main():
     with open(CONFIG_PATH, "r") as fp:
         config = yaml.safe_load(fp)
     
     device = torch.device(f"cuda:{GPU}")
+    t5_model_kwargs = {
+        "low_cpu_mem_usage": True,
+        "torch_dtype": torch.float32,
+        "device_map": {"shared": device, "encoder": device},
+    }
+
     text_embedder = T5Embedder(
         from_pretrained=MODEL_PATH, 
         model_max_length=config["dataset"]["tokenizer_max_length"], 
         device=device,
+        t5_model_kwargs=t5_model_kwargs,
         use_offload_folder=OFFLOAD_DIR
     )
     tokenizer, text_encoder = text_embedder.tokenizer, text_embedder.model
     
     # Get all the task paths
     task_paths = []
-    for sub_dir in os.listdir(TARGET_DIR):
-        middle_dir = os.path.join(TARGET_DIR, sub_dir)
-        if os.path.isdir(middle_dir):
-            for task_dir in os.listdir(middle_dir):
-                task_path = os.path.join(middle_dir, task_dir)
-                if os.path.isdir(task_path):
-                    task_paths.append(task_path)
+    for episode_dir in os.listdir(TARGET_DIR):
+        episode_path = os.path.join(TARGET_DIR, episode_dir)
+        if not os.path.isdir(episode_path):
+            continue
+
+        instr_path = os.path.join(episode_path, "expanded_instruction_gpt-4-turbo.json")
+        if os.path.exists(instr_path):
+            task_paths.append(episode_path)
+
+    print(f"Found {len(task_paths)} episodes with instruction json.")
 
     # For each task, encode the instructions
     for task_path in tqdm(task_paths):
         # Load the instructions corresponding to the task from the directory
         with open(os.path.join(task_path, 'expanded_instruction_gpt-4-turbo.json'), 'r') as f_instr:
             instruction_dict = json.load(f_instr)
-        instructions = [instruction_dict['instruction']] + instruction_dict['simplified_instruction'] + \
-            instruction_dict['expanded_instruction']
+
+        
+
+
+        instructions = (
+            as_list(instruction_dict.get("instruction", ""))
+            + as_list(instruction_dict.get("simplified_instruction", ""))
+            + as_list(instruction_dict.get("expanded_instruction", ""))
+        )
     
-        # Encode the instructions
+        # Encode the instructions  对语言指令进行编码
         tokenized_res = tokenizer(
             instructions, return_tensors="pt",
             padding="longest",
