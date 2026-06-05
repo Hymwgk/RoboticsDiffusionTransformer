@@ -1,0 +1,78 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+        "name": "Python: Current File",
+        "type": "debugpy",
+        "request": "launch",
+        "program": "${file}",
+        "console": "integratedTerminal"
+        //"args" : ["-v"],
+    },
+    {
+      "name": "Debug RDT single GPU",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "console": "integratedTerminal",
+      "env": {
+        "NCCL_SOCKET_IFNAME": "lo",
+        "NCCL_IB_DISABLE": "1",
+        "CUDA_VISIBLE_DEVICES": "1",
+        "HF_HOME": "/model/huggingface",
+        "HUGGINGFACE_HUB_CACHE": "/model/huggingface/hub",
+        "TEXT_ENCODER_NAME": "google/t5-v1_1-xxl",
+        "VISION_ENCODER_NAME": "google/siglip-so400m-patch14-384",
+        "WANDB_MODE": "offline",
+        "WANDB_PROJECT": "robotic_diffusion_transformer"
+      },
+      "args": [
+        "--pretrained_model_name_or_path", "robotics-diffusion-transformer/rdt-1b",
+        "--pretrained_text_encoder_name_or_path", "google/t5-v1_1-xxl",
+        "--pretrained_vision_encoder_name_or_path", "google/siglip-so400m-patch14-384",
+        "--output_dir", "/model/wgk/checkpoints/debug-rdt",
+        "--precomp_lang_embed",
+        "--train_batch_size", "1",
+        "--sample_batch_size", "1",
+        "--max_train_steps", "10",
+        "--checkpointing_period", "100",
+        "--sample_period", "5",
+        "--checkpoints_total_limit", "2",
+        "--lr_scheduler", "constant",
+        "--learning_rate", "1e-4",
+        "--mixed_precision", "bf16",
+        "--dataloader_num_workers", "1",
+        "--dataset_type", "finetune",
+        "--state_noise_snr", "40",
+        "--load_from_hdf5",
+        "--report_to", "wandb"
+      ],
+      "justMyCode": false
+    },
+    {
+      "name": "isaaclab_to_rdt",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/data/isaaclab_to_rdt.py",
+      "console": "integratedTerminal",
+
+      "args": [
+        "--input-root", "/data/isaaclab_js",
+        "--output-root", "/data/rdt_js",
+      ],
+      "justMyCode": false
+    },
+    {
+      "name": "encode_lang",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "scripts.encode_lang_batch",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "args": [
+      ],
+      "justMyCode": false
+    }
+
+  ]
+}

@@ -293,6 +293,10 @@ rdt_js/
 
 If your fine-tuning dataset is in the [Open X-Embodiment](https://robotics-transformer-x.github.io/) or the collection of our pre-training datasets (see [this doc](docs/pretrain.md#download-and-prepare-datasets)), you can also fine-tune RDT through the pre-trained pipeline. You need to remove other redundant datasets in the parameters. We refer to [this guide](docs/pretrain.md) (pre-training).
 
+- 确认转换后数据集`/data/rdt_js` 满足rdt的格式要求
+- 确认...
+
+
 1. 准备自己的数据集，以hdf5格式的数据集为例:
    经过上述转换得到rdt结构的数据集`/data/rdt_js`
    
@@ -305,7 +309,7 @@ If your fine-tuning dataset is in the [Open X-Embodiment](https://robotics-trans
    ln -s /data/rdt_js   datasets/rdt_js
    ```
 
-2. 计算转换后的rdt数据集统计量
+2. 计算转换后的rdt数据集统计量 **注意:** 每次变动数据集都要重新计算一边
    ```bash
    # Under the root directory of this repo
    # Use -h to see the full usage
