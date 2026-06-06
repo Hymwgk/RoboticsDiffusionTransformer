@@ -6,6 +6,7 @@
         "type": "debugpy",
         "request": "launch",
         "program": "${file}",
+        "cwd": "${workspaceFolder}",
         "console": "integratedTerminal"
         //"args" : ["-v"],
     },
@@ -53,7 +54,7 @@
       "name": "isaaclab_to_rdt",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/data/isaaclab_to_rdt.py",
+      "module": "data.isaaclab_to_rdt",
       "console": "integratedTerminal",
 
       "args": [
@@ -71,6 +72,20 @@
       "cwd": "${workspaceFolder}",
       "args": [
       ],
+      "justMyCode": false
+    },
+
+    {
+      "name": "Python: RDT IsaacLab Eval",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "eval_sim.eval_rdt_isaaclab",
+      "args": [
+        "--enable_cameras"
+      ],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+
       "justMyCode": false
     }
 

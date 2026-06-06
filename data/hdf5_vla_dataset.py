@@ -7,7 +7,7 @@ import yaml
 import cv2
 import numpy as np
 
-from configs.state_vec import STATE_VEC_IDX_MAPPING
+from configs.isaaclab_const import ISAACLAB_PROPRIO_INDICES, ISAACLAB_ACTION_INDICES
 
 
 class HDF5VLADataset:
@@ -116,40 +116,26 @@ class HDF5VLADataset:
         # 
         with h5py.File(file_path, 'r') as f:
             
-            qpos = f['observations']['qpos'][:]
-            num_steps = qpos.shape[0]
+            proprio = f['observations']['proprio'][:]
+            num_steps = proprio.shape[0]
             # [Optional] 要求每个回合的长度不小于128步
             if num_steps < 128:
                 return False, None
             
             # [Optional] We skip the first few still steps
             EPS = 1e-2
-            # Get the idx of the first qpos whose delta exceeds the threshold
+            # Get the idx of the first proprio whose delta exceeds the threshold
             # 这里的目的是为了跳过回合开始时机械臂还没有动的那些步骤
-            qpos_delta = np.abs(qpos - qpos[0:1])
-            indices = np.where(np.any(qpos_delta > EPS, axis=1))[0]
+            proprio_delta = np.abs(proprio - proprio[0:1])
+            indices = np.where(np.any(proprio_delta > EPS, axis=1))[0]
             if len(indices) > 0:
                 first_idx = indices[0]
             else:
-                raise ValueError("Found no qpos that exceeds the threshold.")
+                raise ValueError("Found no proprio that exceeds the threshold.")
             
             # 随机采样一个时间步，作为起始
             step_id = np.random.randint(first_idx-1, num_steps)
             
-            # 读取语言指令
-            # dir_path = os.path.dirname(file_path)
-            # with open(os.path.join(dir_path, 'expanded_instruction_gpt-4-turbo.json'), 'r') as f_instr:
-            #     instruction_dict = json.load(f_instr)
-            # # We have 1/3 prob to use original instruction,
-            # # 1/3 to use simplified instruction,
-            # # and 1/3 to use expanded instruction.
-            # instruction_type = np.random.choice([
-            #     'instruction', 'simplified_instruction', 'expanded_instruction'])
-            # instruction = instruction_dict[instruction_type]
-            # if isinstance(instruction, list):
-            #     instruction = np.random.choice(instruction)
-            # You can also use precomputed language embeddings (recommended)
-            # instruction = "path/to/lang_embed.pt"
 
             # 这里直接使用预编码的语言指令embedding文件，避免在训练过程中重复计算语言指令的编码
             dir_path = os.path.dirname(file_path)
@@ -164,20 +150,12 @@ class HDF5VLADataset:
                 "instruction": instruction
             }
             
-            # 将夹爪动作缩放到 [0, 1] 已经在isaaclab_to_rdt.py里做了，这里就不重复了
-            # right_pos(3) + right_rot6d(6) + right_gripper(1)
-            # left_pos(3) + left_rot6d(6) + left_gripper(1)
-            # qpos = qpos / np.array(
-            #    [[1, 1, 1, 1, 1, 1, 4.7908, 1, 1, 1, 1, 1, 1, 4.7888]] 
-            # )
-
-            #
             
             # Parse the state and action
-            state = qpos[step_id:step_id+1]
-            state_std = np.std(qpos, axis=0)
-            state_mean = np.mean(qpos, axis=0)
-            state_norm = np.sqrt(np.mean(qpos**2, axis=0))
+            state = proprio[step_id:step_id+1]
+            state_std = np.std(proprio, axis=0)
+            state_mean = np.mean(proprio, axis=0)
+            state_norm = np.sqrt(np.mean(proprio**2, axis=0))
             actions = f['action'][step_id:step_id+self.CHUNK_SIZE] 
 
             if actions.shape[0] < self.CHUNK_SIZE:
@@ -193,26 +171,11 @@ class HDF5VLADataset:
                 # right_arm_joint_pos(7) + right_pos(3) + right_rot6d(6) + right_gripper(1)
                 # left_arm_joint_pos(7) + left_pos(3)  + left_rot6d(6)  + left_gripper(1)
 
-                UNI_STATE_INDICES = [
-                    *[STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(7)],
-                    STATE_VEC_IDX_MAPPING["right_eef_pos_x"],
-                    STATE_VEC_IDX_MAPPING["right_eef_pos_y"],
-                    STATE_VEC_IDX_MAPPING["right_eef_pos_z"],
-                    *[STATE_VEC_IDX_MAPPING[f"right_eef_angle_{i}"] for i in range(6)],
-                    STATE_VEC_IDX_MAPPING["right_gripper_open"],
-
-                    *[STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(7)],
-                    STATE_VEC_IDX_MAPPING["left_eef_pos_x"],
-                    STATE_VEC_IDX_MAPPING["left_eef_pos_y"],
-                    STATE_VEC_IDX_MAPPING["left_eef_pos_z"],
-                    *[STATE_VEC_IDX_MAPPING[f"left_eef_angle_{i}"] for i in range(6)],
-                    STATE_VEC_IDX_MAPPING["left_gripper_open"],
-                ]
-                assert values.shape[-1] == len(UNI_STATE_INDICES), \
-                    f"Expected {len(UNI_STATE_INDICES)} dims, got {values.shape[-1]}"
+                assert values.shape[-1] == len(ISAACLAB_PROPRIO_INDICES), \
+                    f"Expected {len(ISAACLAB_PROPRIO_INDICES)} dims, got {values.shape[-1]}"
 
                 uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,), dtype=np.float32)
-                uni_vec[..., UNI_STATE_INDICES] = values
+                uni_vec[..., ISAACLAB_PROPRIO_INDICES] = values
                 return uni_vec
             
             # 将动作也填充到统一的向量空间中
@@ -220,25 +183,11 @@ class HDF5VLADataset:
                 # values: (..., 20)
                 # right_pos(3) + right_rot6d(6) + right_gripper(1)
                 # left_pos(3)  + left_rot6d(6)  + left_gripper(1)
-
-                UNI_STATE_INDICES = [
-                    STATE_VEC_IDX_MAPPING["right_eef_pos_x"],
-                    STATE_VEC_IDX_MAPPING["right_eef_pos_y"],
-                    STATE_VEC_IDX_MAPPING["right_eef_pos_z"],
-                    *[STATE_VEC_IDX_MAPPING[f"right_eef_angle_{i}"] for i in range(6)],
-                    STATE_VEC_IDX_MAPPING["right_gripper_open"],
-
-                    STATE_VEC_IDX_MAPPING["left_eef_pos_x"],
-                    STATE_VEC_IDX_MAPPING["left_eef_pos_y"],
-                    STATE_VEC_IDX_MAPPING["left_eef_pos_z"],
-                    *[STATE_VEC_IDX_MAPPING[f"left_eef_angle_{i}"] for i in range(6)],
-                    STATE_VEC_IDX_MAPPING["left_gripper_open"],
-                ]
-                assert values.shape[-1] == len(UNI_STATE_INDICES), \
-                    f"Expected {len(UNI_STATE_INDICES)} dims, got {values.shape[-1]}"
+                assert values.shape[-1] == len(ISAACLAB_ACTION_INDICES), \
+                    f"Expected {len(ISAACLAB_ACTION_INDICES)} dims, got {values.shape[-1]}"
 
                 uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,), dtype=np.float32)
-                uni_vec[..., UNI_STATE_INDICES] = values
+                uni_vec[..., ISAACLAB_ACTION_INDICES] = values
                 return uni_vec
 
             state = fill_in_state(state)
@@ -247,7 +196,7 @@ class HDF5VLADataset:
             state_mean = fill_in_state(state_mean)
             state_norm = fill_in_state(state_norm)
             # If action's format is different from state's,
-            # you may implement fill_in_action()
+            # 将isaaclab数据集动作 转换为 统一向量空间
             actions = fill_in_action(actions)
             
             # Parse the images
@@ -255,7 +204,23 @@ class HDF5VLADataset:
                 imgs = []
                 for i in range(max(step_id-self.IMG_HISORY_SIZE+1, 0), step_id+1):
                     img = f['observations']['images'][key][i]
-                    imgs.append(cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR))
+                    # 保证读取出的通道是RGB和推理时候一致
+                    img = cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR)
+
+                    # if key == "cam_high" and i == step_id:
+
+                    #     from PIL import Image
+
+                    #     from pathlib import Path
+
+                    #     debug_dir = Path("/tmp/rdt_image_debug")
+
+                    #     debug_dir.mkdir(parents=True, exist_ok=True)
+
+                    #     Image.fromarray(img).save(debug_dir / "02_rdt_decoded_as_pil.png")
+
+                    # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    imgs.append(img)
                 imgs = np.stack(imgs)
                 if imgs.shape[0] < self.IMG_HISORY_SIZE:
                     # Pad the images using the first image
@@ -283,7 +248,7 @@ class HDF5VLADataset:
             return True, {
                 "meta": meta,
                 "state": state,
-                "state_std": state_std,
+                "state_std": state_std,   # TODO debug检查是否在微调过程中使用了 统计量进行归一化？
                 "state_mean": state_mean,
                 "state_norm": state_norm,
                 "actions": actions,
@@ -298,70 +263,40 @@ class HDF5VLADataset:
 
     def parse_hdf5_file_state_only(self, file_path):
         with h5py.File(file_path, 'r') as f:
-            qpos = f['observations']['qpos'][:].astype(np.float32)
+            proprio = f['observations']['proprio'][:].astype(np.float32)
             action_all = f['action'][:].astype(np.float32)
 
-            num_steps = qpos.shape[0]
+            num_steps = proprio.shape[0]
             if num_steps < 128:
                 return False, None
 
             EPS = 1e-2
-            qpos_delta = np.abs(qpos - qpos[0:1])
-            indices = np.where(np.any(qpos_delta > EPS, axis=1))[0]
+            proprio_delta = np.abs(proprio - proprio[0:1])
+            indices = np.where(np.any(proprio_delta > EPS, axis=1))[0]
             if len(indices) > 0:
                 first_idx = indices[0]
             else:
-                raise ValueError("Found no qpos that exceeds the threshold.")
+                raise ValueError("Found no proprio that exceeds the threshold.")
 
-            state = qpos[first_idx - 1:]
+            state = proprio[first_idx - 1:]
             action = action_all[first_idx - 1:]
 
             def fill_in_state(values):
                 # values: (..., 34)
-                UNI_STATE_INDICES = [
-                    *[STATE_VEC_IDX_MAPPING[f"right_arm_joint_{i}_pos"] for i in range(7)],
-                    STATE_VEC_IDX_MAPPING["right_eef_pos_x"],
-                    STATE_VEC_IDX_MAPPING["right_eef_pos_y"],
-                    STATE_VEC_IDX_MAPPING["right_eef_pos_z"],
-                    *[STATE_VEC_IDX_MAPPING[f"right_eef_angle_{i}"] for i in range(6)],
-                    STATE_VEC_IDX_MAPPING["right_gripper_open"],
-
-                    *[STATE_VEC_IDX_MAPPING[f"left_arm_joint_{i}_pos"] for i in range(7)],
-                    STATE_VEC_IDX_MAPPING["left_eef_pos_x"],
-                    STATE_VEC_IDX_MAPPING["left_eef_pos_y"],
-                    STATE_VEC_IDX_MAPPING["left_eef_pos_z"],
-                    *[STATE_VEC_IDX_MAPPING[f"left_eef_angle_{i}"] for i in range(6)],
-                    STATE_VEC_IDX_MAPPING["left_gripper_open"],
-                ]
-
-                assert values.shape[-1] == len(UNI_STATE_INDICES), \
-                    f"Expected {len(UNI_STATE_INDICES)} dims, got {values.shape[-1]}"
+                assert values.shape[-1] == len(ISAACLAB_PROPRIO_INDICES), \
+                    f"Expected {len(ISAACLAB_PROPRIO_INDICES)} dims, got {values.shape[-1]}"
 
                 uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,), dtype=np.float32)
-                uni_vec[..., UNI_STATE_INDICES] = values
+                uni_vec[..., ISAACLAB_PROPRIO_INDICES] = values
                 return uni_vec
 
             def fill_in_action(values):
                 # values: (..., 20)
-                UNI_STATE_INDICES = [
-                    STATE_VEC_IDX_MAPPING["right_eef_pos_x"],
-                    STATE_VEC_IDX_MAPPING["right_eef_pos_y"],
-                    STATE_VEC_IDX_MAPPING["right_eef_pos_z"],
-                    *[STATE_VEC_IDX_MAPPING[f"right_eef_angle_{i}"] for i in range(6)],
-                    STATE_VEC_IDX_MAPPING["right_gripper_open"],
-
-                    STATE_VEC_IDX_MAPPING["left_eef_pos_x"],
-                    STATE_VEC_IDX_MAPPING["left_eef_pos_y"],
-                    STATE_VEC_IDX_MAPPING["left_eef_pos_z"],
-                    *[STATE_VEC_IDX_MAPPING[f"left_eef_angle_{i}"] for i in range(6)],
-                    STATE_VEC_IDX_MAPPING["left_gripper_open"],
-                ]
-
-                assert values.shape[-1] == len(UNI_STATE_INDICES), \
-                    f"Expected {len(UNI_STATE_INDICES)} dims, got {values.shape[-1]}"
+                assert values.shape[-1] == len(ISAACLAB_ACTION_INDICES), \
+                    f"Expected {len(ISAACLAB_ACTION_INDICES)} dims, got {values.shape[-1]}"
 
                 uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,), dtype=np.float32)
-                uni_vec[..., UNI_STATE_INDICES] = values
+                uni_vec[..., ISAACLAB_ACTION_INDICES] = values
                 return uni_vec
 
             state = fill_in_state(state)

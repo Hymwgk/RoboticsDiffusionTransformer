@@ -49,6 +49,9 @@ The following guides include the [installation](#installation), [fine-tuning](#f
     wget https://github.com/Dao-AILab/flash-attention/releases/download/v2.2.2/flash_attn-2.2.2+cu121torch2.1cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 
     pip install flash_attn-2.2.2+cu121torch2.1cxx11abiFALSE-cp310-cp310-linux_x86_64.whl 
+
+    将本仓库路径添加到环境变量中，默认放在了`~/code`文件夹下
+    export PYTHONPATH=~/code/RoboticsDiffusionTransformer:$PYTHONPATH
     ```
 
 2. Download off-the-shelf multi-modal encoders:
@@ -206,11 +209,11 @@ task.hdf5
     │   │   ├── gsmini_right_left_tactile_rgb  # 右手左侧视触觉相机的原始 RGB 图像 (T,180,240,3) dtype=float32
     │   │   ├── gsmini_right_left_marker_motion# 右手左侧视触觉相机的 Marker 点特征运动向量 (T,2,99,2) dtype=float32
     │   │   │
-    │   │   ├── zed_left                 # ZED双目相机左眼视角图像 (T,480,640,3) dtype=uint8
-    │   │   ├── zed_right                # ZED双目相机右眼视角图像 (T,480,640,3) dtype=uint8
-    │   │   ├── wrist_cam_left           # 左手腕部相机视角图像 (T,480,640,3) dtype=uint8
-    │   │   ├── wrist_cam_right          # 右手腕部相机视角图像 (T,480,640,3) dtype=uint8
-    │   │   └── table_cam                # 台面/全局视角固定相机图像 (T,480,640,3) dtype=uint8
+    │   │   ├── zed_left                 # ZED双目相机左眼视角图像 (T,480,640,3) dtype=uint8 (0~255) TODO 预训练的是(0~255)or(0~1)?
+    │   │   ├── zed_right                # ZED双目相机右眼视角图像 (T,480,640,3) dtype=uint8 (0~255)
+    │   │   ├── wrist_cam_left           # 左手腕部相机视角图像 (T,480,640,3) dtype=uint8 (0~255)
+    │   │   ├── wrist_cam_right          # 右手腕部相机视角图像 (T,480,640,3) dtype=uint8 (0~255)
+    │   │   └── table_cam                # 台面/全局视角固定相机图像 (T,480,640,3) dtype=uint8 (0~255)
     │   │
     │   └── actions                      # 动作空间：双臂控制目标输出 (T,16) dtype=float32 TODO：action似乎并没有用控制量，检查一下
     │                                    # r_ee_pos(3) + r_quat_wxyz(4) + r_gripper(1) + l_ee_pos(3) + l_quat_wxyz(4) + l_gripper(1)

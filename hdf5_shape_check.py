@@ -18,7 +18,7 @@ with h5py.File(hdf5_path, "r") as f:
             f"dtype={data.dtype}"
         )
 
-        if len(data.shape) <= 2:
+        if len(data.shape) <= 4:
             print(" first sample:")
             print(np.asarray(data[0]))
             print()

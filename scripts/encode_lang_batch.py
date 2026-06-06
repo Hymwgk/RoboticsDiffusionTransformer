@@ -1,6 +1,6 @@
 import os
 import json
-
+from pathlib import Path
 import torch
 import yaml
 from tqdm import tqdm
@@ -59,21 +59,23 @@ def main():
 
     print(f"Found {len(task_paths)} episodes with instruction json.")
 
+    # 创建一个独立的embedding文件夹  TARGET_DIR = "/data/rdt_js"
+    embedding_dir = Path(TARGET_DIR) / "text_embeddings"
+    embedding_dir.mkdir(parents=True, exist_ok=True)
+
     # For each task, encode the instructions
     for task_path in tqdm(task_paths):
         # Load the instructions corresponding to the task from the directory
         with open(os.path.join(task_path, 'expanded_instruction_gpt-4-turbo.json'), 'r') as f_instr:
             instruction_dict = json.load(f_instr)
-
-        
-
-
+        # 获取当前任务的名称
+        task_name = instruction_dict.get("task_name", "")
         instructions = (
             as_list(instruction_dict.get("instruction", ""))
             + as_list(instruction_dict.get("simplified_instruction", ""))
             + as_list(instruction_dict.get("expanded_instruction", ""))
         )
-    
+
         # Encode the instructions  对语言指令进行编码
         tokenized_res = tokenizer(
             instructions, return_tensors="pt",
@@ -91,11 +93,21 @@ def main():
         
         attn_mask = attn_mask.cpu().bool()
 
-        # Save the embeddings for training use
-        for i in range(len(instructions)):
+
+        prox = ["instruction", "simplified_instruction", "expanded_instruction"]
+        # Save the embeddings for training and inference.
+        for i, instr_type in enumerate(prox):
             text_embed = text_embeds[i][attn_mask[i]]
-            save_path = os.path.join(task_path, f"lang_embed_{i}.pt")
-            torch.save(text_embed, save_path)
+            # 保存到当前 episode/task 目录，供训练使用
+            train_save_path = os.path.join(task_path, f"lang_embed_{i}.pt")
+            torch.save(text_embed, train_save_path)
+            # 额外保存一份到统一 embedding 目录，供推理使用
+            infer_save_path = embedding_dir / f"text_embed_{task_name}_{instr_type}.pt"
+            if not infer_save_path.exists():
+                torch.save(text_embed, infer_save_path)
+            #     print(f"Saved inference text embedding: {infer_save_path}")
+            # else:
+            #     print(f"Inference text embedding already exists, skipped: {infer_save_path}")
 
 if __name__ == "__main__":
     main()

@@ -26,7 +26,7 @@
 每个episode文件夹中的 data.hdf5 内部结构：
     data.hdf5
     ├── observations
-    │   ├── qpos
+    │   ├── proprio
     │   └── images
     │       ├── cam_high
     │       ├── cam_left_wrist
@@ -41,23 +41,17 @@ import fnmatch
 import json
 import os
 from pathlib import Path
+import torch
 
+from PIL import Image
 import cv2
 import h5py
 import numpy as np
 from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
 
-LEFT_GRIPPER_MAX = 0.04
-RIGHT_GRIPPER_MAX = 0.04
+from configs.isaaclab_const import LEFT_GRIPPER_MAX, RIGHT_GRIPPER_MAX, CAMERA_MAPPING, ISAACLAB_PROPRIO_KEYS, ISAACLAB_RAW_ACTION_SLICE
 
-
-# 相机字段映射：isaaclab数据集 obs 中的字段 -> 输出 data.hdf5 中的字段
-CAMERA_MAPPING= {
-    "cam_high": "zed_left",
-    "cam_left_wrist": "wrist_cam_left",
-    "cam_right_wrist": "wrist_cam_right",
-}
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -116,6 +110,7 @@ def infer_instruction_payload(task_stem: str, instructions: dict[str, dict[str, 
             instruction = "Perform the task."
 
     return {
+        "task_name": canonical_stem,
         "instruction": instruction,
         "simplified_instruction": instruction,
         "expanded_instruction": instruction,
@@ -215,39 +210,62 @@ def reduce_gripper(gripper: np.ndarray, max_value: float) -> np.ndarray:
 
     return np.clip(gripper / max_value, 0.0, 1.0).astype(np.float32)
 
+
+
 def quat_wxyz_to_rot6d(quat_wxyz: np.ndarray) -> np.ndarray:
-
+    """将四元数转换为6d表征"""
     quat_wxyz = np.asarray(quat_wxyz, dtype=np.float32)
-
     quat_xyzw = quat_wxyz[:, [1, 2, 3, 0]]
-
     rotmat = R.from_quat(quat_xyzw).as_matrix()      # (T,3,3)
-
     rot6d = rotmat[:, :, :2].transpose(0, 2, 1).reshape(-1, 6)
-
     return rot6d.astype(np.float32)
+
+
+
+def rotmat_to_rot6d(rotmat):
+    """
+    rotmat: [B,3,3]
+
+    return:
+        [B,6]
+    """
+
+    return (
+        rotmat[:, :, :2]
+        .transpose(1, 2)
+        .reshape(rotmat.shape[0], 6)
+    )
+
+
+
 
 def build_action_from_raw_action(raw_action: np.ndarray) -> np.ndarray:
     """
-    raw_action: (T,16)
+    raw_action: (T, 16)
       right_pos(3) + right_quat_wxyz(4) + right_gripper(1)
       left_pos(3)  + left_quat_wxyz(4)  + left_gripper(1)
-    return: (T,20)
+
+    return: (T, 20)
       right_pos(3) + right_rot6d(6) + right_gripper(1)
-    left_pos(3)  + left_rot6d(6)  + left_gripper(1)
+      left_pos(3)  + left_rot6d(6)  + left_gripper(1)
     """
     raw_action = np.asarray(raw_action, dtype=np.float32)
+
     assert raw_action.ndim == 2, raw_action.shape
     assert raw_action.shape[-1] == 16, raw_action.shape
-    right_pos = raw_action[:, 0:3] 
-    right_quat = raw_action[:, 3:7] # wxyz
-    # 夹爪动作归一化到 [0,1]
-    right_gripper = np.clip(raw_action[:, 7:8], 0.0, 1.0).astype(np.float32) 
 
-    left_pos = raw_action[:, 8:11]
-    left_quat = raw_action[:, 11:15] # wxyz
-    left_gripper = np.clip(raw_action[:, 15:16], 0.0, 1.0).astype(np.float32)
-    # 转换为6d姿态
+
+    right_pos = raw_action[:, ISAACLAB_RAW_ACTION_SLICE["right_pos"]]
+    right_quat = raw_action[:, ISAACLAB_RAW_ACTION_SLICE["right_quat_wxyz"]]
+    right_gripper = raw_action[:, ISAACLAB_RAW_ACTION_SLICE["right_gripper"]]
+
+    left_pos = raw_action[:, ISAACLAB_RAW_ACTION_SLICE["left_pos"]]
+    left_quat = raw_action[:, ISAACLAB_RAW_ACTION_SLICE["left_quat_wxyz"]]
+    left_gripper = raw_action[:, ISAACLAB_RAW_ACTION_SLICE["left_gripper"]]
+
+    right_gripper = np.clip(right_gripper, 0.0, 1.0).astype(np.float32)
+    left_gripper = np.clip(left_gripper, 0.0, 1.0).astype(np.float32)
+
     right_rot6d = quat_wxyz_to_rot6d(right_quat)
     left_rot6d = quat_wxyz_to_rot6d(left_quat)
 
@@ -262,17 +280,15 @@ def build_action_from_raw_action(raw_action: np.ndarray) -> np.ndarray:
         ],
         axis=-1,
     ).astype(np.float32)
+
     assert action.shape[-1] == 20, action.shape
     return action
 
 
-def build_qpos_from_obs(obs: h5py.Group) -> np.ndarray:
+def build_proprio_from_obs(obs: h5py.Group) -> np.ndarray:
     """
-    构造 observations/qpos。
-
-    优先级：
-    1. 如果原始 obs 中已有 qpos，直接使用 obs["qpos"]
-    2. 否则根据 EEF pose + gripper 拼一个状态向量：
+    构造 observations/proprio。
+    读取isaaclab数据集原始obs, 构造出一个状态向量：
        left:  eef_pos_left_b  + eef_quat_left_b  + gripper_left_pos
        right: eef_pos_right_b + eef_quat_right_b + gripper_right_pos
 
@@ -281,23 +297,11 @@ def build_qpos_from_obs(obs: h5py.Group) -> np.ndarray:
     - 如果你采用 EEF pose 表示，后续还需要修改 hdf5_vla_dataset.py 里的 fill_in_state()
       以及旋转四元数转 6D 的逻辑。
     """
-    if "qpos" in obs:
-        return np.asarray(obs["qpos"], dtype=np.float32)
-
-    required_keys = [
-        "eef_pos_left_b",
-        "eef_quat_left_b",
-        "gripper_left_pos",
-        "eef_pos_right_b",
-        "eef_quat_right_b",
-        "gripper_right_pos",
-        "joint_pos_left",
-        "joint_pos_right",
-    ]
-    missing = [k for k in required_keys if k not in obs]
+    # 检查
+    missing = [k for k in ISAACLAB_PROPRIO_KEYS if k not in obs]
     if missing:
         raise KeyError(
-            "无法构造 qpos。原始 obs 中既没有 qpos，也缺少这些 EEF 字段："
+            "无法构造 proprio。原始 obs 中既没有 proprio 也缺少这些 EEF 字段："
             + ", ".join(missing)
         )
     # 只要手臂关节不要gripper关节
@@ -315,8 +319,7 @@ def build_qpos_from_obs(obs: h5py.Group) -> np.ndarray:
     left_gripper = reduce_gripper(obs["gripper_left_pos"], LEFT_GRIPPER_MAX)
 
 
-
-    qpos = np.concatenate(
+    proprio = np.concatenate(
         [
             right_arm_joints,
             right_pos,
@@ -326,12 +329,12 @@ def build_qpos_from_obs(obs: h5py.Group) -> np.ndarray:
             left_pos,
             left_rot6d,
             left_gripper,
-
         ],
         axis=-1,
     ).astype(np.float32)
-    assert qpos.shape[-1] == 34, qpos.shape
-    return qpos
+    assert proprio.shape[-1] == 34, proprio.shape
+    return proprio
+
 
 
 def copy_optional_obs_fields(obs: h5py.Group, out_obs: h5py.Group) -> None:
@@ -381,13 +384,13 @@ def convert_one_demo_to_episode(
     obs = episode["obs"]
     # 构造 action
     actions = build_action_from_raw_action(episode["actions"])
-    # 构造 qpos
-    qpos = build_qpos_from_obs(obs)
+    # 构造 proprio
+    proprio = build_proprio_from_obs(obs)
 
     num_steps = int(actions.shape[0])
-    if qpos.shape[0] != num_steps:
-        min_len = min(qpos.shape[0], num_steps)
-        qpos = qpos[:min_len]
+    if proprio.shape[0] != num_steps:
+        min_len = min(proprio.shape[0], num_steps)
+        proprio = proprio[:min_len]
         actions = actions[:min_len]
         num_steps = min_len
     # 
@@ -395,7 +398,7 @@ def convert_one_demo_to_episode(
         obs_group = f_out.create_group("observations")
         image_group = obs_group.create_group("images")
 
-        obs_group.create_dataset("qpos", data=qpos.astype(np.float32))
+        obs_group.create_dataset("proprio", data=proprio.astype(np.float32))
         f_out.create_dataset("action", data=actions.astype(np.float32))
 
         # 保留 EEF 原始字段，方便后续自定义 Dataset 时使用
@@ -413,6 +416,13 @@ def convert_one_demo_to_episode(
                 raise KeyError(f"原始 obs 中缺少相机字段：{src_key}")
 
             images = np.asarray(obs[src_key])
+
+            # debug: 保存原始 IsaacLab 图像
+            debug_dir = Path("/tmp/rdt_image_debug")
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            if episode_dir.name == "episode_000000" and out_key == "cam_high":
+                Image.fromarray(images[0]).save(debug_dir / "01_isaac_raw_as_pil.png")
+                
             if images.shape[0] != num_steps:
                 images = images[:num_steps]
 
@@ -438,6 +448,11 @@ def convert_all(
 ) -> None:
     # 创建输出文件夹
     output_root.mkdir(parents=True, exist_ok=True)
+    # 将语言指令，以json格式再次保存一份
+    instructions_path = output_root / "Instructions.json"
+    with open(instructions_path, "w") as f:
+        json.dump(instructions, f, indent=4)
+
     # 遍历输入文件夹，找到所有 HDF5 文件
     source_files = iter_source_files(input_root)
     if not source_files:
