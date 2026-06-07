@@ -116,11 +116,11 @@ The following guides include the [installation](#installation), [fine-tuning](#f
 ## RDT 数据集结构解释，以hdf5数据集为例
 
 
-```
+```bash
 rdt_js/                                       # 数据集名称
 ├── episode_000/                              # 每个回合的单独文件夹
-│   ├── data.hdf5                             # 每个回合的数据文件
-│   └── expanded_instruction_gpt-4-turbo.json # 任务指令说明
+│   ├── data.hdf5                             # 每个回合单独一个hdf5数据文件
+│   └── expanded_instruction_gpt-4-turbo.json # 回合所属的 任务  的指令说明
 ├── episode_001/
 │   ├── data.hdf5
 │   └── expanded_instruction_gpt-4-turbo.json
@@ -144,22 +144,17 @@ rdt_js/                                       # 数据集名称
 这三个版本的指令，在训练时会被随机采用，各1/3的概率。
 
 ### data.hdf5 文件内部结构
-```
-/
+```bash
+data.hdf
 ├── observations               
-│   ├── qpos                   # 128维度统一空间
+│   ├── proprio                # shape = (T, 34)本体感知 proprio 状态
 │   └── images
-│       ├── cam_high           # 顶部相机
-│       ├── cam_left_wrist     # 左手腕相机
-│       └── cam_right_wrist    # 右手腕相机
-└── action                     # 128维度统一空间
+│       ├── cam_high           # JPG 二进制流 (Bytes)  顶部相机
+│       ├── cam_left_wrist     # JPG 二进制流 (Bytes)  左手腕相机
+│       └── cam_right_wrist    # JPG 二进制流 (Bytes)  右手腕相机
+└── action                     # shape = (T, 20) 动作
 ```
-其中数据格式为
-```
-observations/qpos: shape = (T, N)
-action:            shape = (T, N)
-```
-长度 T >= 128
+
 
 
 
@@ -173,11 +168,11 @@ RDT数据集的末端位置姿态，的参考坐标系是 base 还是 world ?
 假设Isaaclab数据集文件夹为`/data/isaaclab_js`，确保其文件结构类似于
 ```
 isaaclab_js/
-├── Get-place-Bandage-merged.hdf5    # 每个任务使用一个hdf5文件表示
-├── Mission-Abort-Estop.hdf5
+├── Get-place-Bandage-merged.hdf5    # 每个任务使用一个hdf5文件表示，格式为{任务名称}.hdf5
+├── Mission-Abort-Estop.hdf5         
 ├── Set-Mode-Off.hdf5
 ├── Sorting-Bullets.hdf5
-└── Instructions.json
+└── Instructions.json                # 每个任务对应的 语言描述（指令）
 ```
 每个 .hdf5 是一个任务，hdf5内部对应多个 demo（每个回合对应一个demo）：
 ```
@@ -250,9 +245,10 @@ task.hdf5
 cd ./data
 python isaaclab_to_rdt.py  --input-root /data/isaaclab_js  --output-root /data/rdt_js
 ```
-检查rdt_js文件夹结构是否如
+检查rdt_js文件夹结构是否如下
 ```bash
 rdt_js/
+├── Instructions.json
 ├── episode_000/
 │   ├── data.hdf5
 │   └── expanded_instruction_gpt-4-turbo.json
@@ -288,13 +284,16 @@ rdt_js/
 │   ├── lang_embed_0.pt
 │   ├── lang_embed_1.pt
 │   └── lang_embed_2.pt
+├── Instructions.json
+└── text_embeddings      # text_embed_{任务名}_{指令类型}.pt
+    ├── text_embed_Get-place-Bandage_expanded_instruction.pt
+    ├── text_embed_Get-place-Bandage_instruction.pt
+    ├── text_embed_Get-place-Bandage_simplified_instruction.pt
 ```
 
 
 
 ### 使用自己的数据集进行微调
-
-If your fine-tuning dataset is in the [Open X-Embodiment](https://robotics-transformer-x.github.io/) or the collection of our pre-training datasets (see [this doc](docs/pretrain.md#download-and-prepare-datasets)), you can also fine-tune RDT through the pre-trained pipeline. You need to remove other redundant datasets in the parameters. We refer to [this guide](docs/pretrain.md) (pre-training).
 
 - 确认转换后数据集`/data/rdt_js` 满足rdt的格式要求
 - 确认...
@@ -333,19 +332,12 @@ If your fine-tuning dataset is in the [Open X-Embodiment](https://robotics-trans
 
       要想将这个类，改动用于自己的数据集，需要做以下几点改动: (a) 修改 `HDF5_DIR` (自己数据集路径`rdt_js`) 以及数据集名称`DATASET_NAME` (`"rdt_js"`) in L21 and L22; (b) 自行实现两个函数 `parse_hdf5_file()` and `parse_hdf5_file_state_only()`. 仔细看源代码和注释。
 
-      Note 1: 不是非要用HDF5文件来存储自己的数据集，只要保证数据集类是正常设置的就行了。
-
-      Note 2: 在部署期间，需要将自己的机器人的动作设定为“统一动作空间”. 看[这个文件](configs/state_vec.py) (L180-194)有对统一动作空间的每个维度的具体含义解释.
-      We have reserved enough slots for each physical quantity. For example, we have reserved ten slots for joint angles. If your robot arm has six degrees of freedom, you only need to fill in the first six. 
-
-      **要点 1:** 如果是单臂机械臂，需要将动作填到“右臂”的部分，而不是“左臂”对应的地方。If your robot is single-arm, please fill its action into the *right-arm* portion of the unified action vector, aligning with our pre-training datasets.
 
       **要点 2:** 本项目使用的是 [6D representation](https://arxiv.org/pdf/1812.07035) 来表征末端执行器的旋转(EEF rotation). 
       如果自己的机器人动作包含 末端执行器(EEF) 的旋转量（角度或四元数），需要参考 [这个文件](docs/test_6drot.py)进行转换. 其实就是说：多个欧拉角可能对应同一个真实旋转姿态，例如 [0,0,0] 和 [360,0,0]；正负号四元数也可能对应同一个真实旋转姿态，例如 [0,0,0,1] 和 [0,0,0,-1]。这导致对于网络而言，同一个物理姿态可能对应多个数值差异巨大的标签，从而增加学习难度。为了解决这一问题，我们希望采用一种与真实旋转姿态（SO(3)）保持一一对应关系的连续表征方式，从而消除这种参数化带来的歧义性，使网络学习更加稳定。
 
       **要点 3:** 在预训练期间，训练脚本里没有对动作/物理量（除了夹具宽度）进行归一化。这样做保留了每个物理量的含义，促进了机器人之间的泛化。因此，建议不要标准化任何物理量，而是为它们选择合适的单位。通常，我们使用国际单位制，这可确保大多数值落在 [-1,1] 范围内。作为例外，本项目将夹具宽度执行最小-最大标准化为 [0,1]。
 
-      **要点 4:** 4090 GPU的显存可能无法加载 `t5-v1_1-xxl` 编码器. 建议先去单独计算语言指令的编码(看 [这个文件](scripts/encode_lang_batch.py)有例子) 然后在微调时候加载语言编码. 这样做的话就得在 `HDF5VLADataset` (see L148) 中加载刚预编码好的语言指令的embedding，而不是输入自然语言。
 
 
 
@@ -434,6 +426,20 @@ If your fine-tuning dataset is in the [Open X-Embodiment](https://robotics-trans
    Note 3: 如果训练出现波动，可以通过添加更多 GPU 或设置更大的 `--gradient_accumulation_steps` 来增加批次大小。
 
    Note 4: 在使用hdf5格式数据集进行微调时，需要指定 `--load_from_hdf5` 参数.
+
+
+
+## 在Isaaclab在线测试
+
+
+安装了我们调整后的isaaclab
+
+--task
+--pretrained_path
+
+
+
+
 
 ## Deployment on Real-Robots
 

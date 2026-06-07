@@ -153,9 +153,10 @@ class HDF5VLADataset:
             
             # Parse the state and action
             state = proprio[step_id:step_id+1]
-            state_std = np.std(proprio, axis=0)
-            state_mean = np.mean(proprio, axis=0)
-            state_norm = np.sqrt(np.mean(proprio**2, axis=0))
+            state_std = np.std(proprio, axis=0, keepdims=True)
+            state_mean = np.mean(proprio, axis=0, keepdims=True)
+            state_norm = np.sqrt(np.mean(proprio**2, axis=0, keepdims=True))
+            
             actions = f['action'][step_id:step_id+self.CHUNK_SIZE] 
 
             if actions.shape[0] < self.CHUNK_SIZE:
@@ -165,39 +166,10 @@ class HDF5VLADataset:
                     np.tile(actions[-1:], (self.CHUNK_SIZE-actions.shape[0], 1))
                 ], axis=0)
             
-            # 将状态观测填充到统一的向量空间中
-            def fill_in_state(values):
-                # values: (..., 34)
-                # right_arm_joint_pos(7) + right_pos(3) + right_rot6d(6) + right_gripper(1)
-                # left_arm_joint_pos(7) + left_pos(3)  + left_rot6d(6)  + left_gripper(1)
 
-                assert values.shape[-1] == len(ISAACLAB_PROPRIO_INDICES), \
-                    f"Expected {len(ISAACLAB_PROPRIO_INDICES)} dims, got {values.shape[-1]}"
+            state_indicator = np.zeros(state.shape[:-1] + (self.STATE_DIM,), dtype=np.float32)
+            state_indicator[..., ISAACLAB_PROPRIO_INDICES] = 1.0
 
-                uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,), dtype=np.float32)
-                uni_vec[..., ISAACLAB_PROPRIO_INDICES] = values
-                return uni_vec
-            
-            # 将动作也填充到统一的向量空间中
-            def fill_in_action(values):
-                # values: (..., 20)
-                # right_pos(3) + right_rot6d(6) + right_gripper(1)
-                # left_pos(3)  + left_rot6d(6)  + left_gripper(1)
-                assert values.shape[-1] == len(ISAACLAB_ACTION_INDICES), \
-                    f"Expected {len(ISAACLAB_ACTION_INDICES)} dims, got {values.shape[-1]}"
-
-                uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,), dtype=np.float32)
-                uni_vec[..., ISAACLAB_ACTION_INDICES] = values
-                return uni_vec
-
-            state = fill_in_state(state)
-            state_indicator = fill_in_state(np.ones_like(state_std))
-            state_std = fill_in_state(state_std)
-            state_mean = fill_in_state(state_mean)
-            state_norm = fill_in_state(state_norm)
-            # If action's format is different from state's,
-            # 将isaaclab数据集动作 转换为 统一向量空间
-            actions = fill_in_action(actions)
             
             # Parse the images
             def parse_img(key):
@@ -206,19 +178,12 @@ class HDF5VLADataset:
                     img = f['observations']['images'][key][i]
                     # 保证读取出的通道是RGB和推理时候一致
                     img = cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_COLOR)
-
                     # if key == "cam_high" and i == step_id:
-
                     #     from PIL import Image
-
                     #     from pathlib import Path
-
                     #     debug_dir = Path("/tmp/rdt_image_debug")
-
                     #     debug_dir.mkdir(parents=True, exist_ok=True)
-
                     #     Image.fromarray(img).save(debug_dir / "02_rdt_decoded_as_pil.png")
-
                     # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                     imgs.append(img)
                 imgs = np.stack(imgs)

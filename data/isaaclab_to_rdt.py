@@ -50,8 +50,10 @@ import numpy as np
 from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
 
-from configs.isaaclab_const import LEFT_GRIPPER_MAX, RIGHT_GRIPPER_MAX, CAMERA_MAPPING, ISAACLAB_PROPRIO_KEYS, ISAACLAB_RAW_ACTION_SLICE
+from configs.isaaclab_const import LEFT_GRIPPER_MAX, RIGHT_GRIPPER_MAX, CAMERA_MAPPING, ISAACLAB_PROPRIO_KEYS, \
+    ISAACLAB_RAW_ACTION_SLICE,ISAACLAB_PROPRIO_INDICES,ISAACLAB_ACTION_INDICES
 
+STATE_DIM = 128
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -285,6 +287,8 @@ def build_action_from_raw_action(raw_action: np.ndarray) -> np.ndarray:
     return action
 
 
+
+
 def build_proprio_from_obs(obs: h5py.Group) -> np.ndarray:
     """
     构造 observations/proprio。
@@ -294,7 +298,7 @@ def build_proprio_from_obs(obs: h5py.Group) -> np.ndarray:
 
     注意：
     - 这一步得到的不一定是当前 HDF5VLADataset 示例中的 14 维关节状态。
-    - 如果你采用 EEF pose 表示，后续还需要修改 hdf5_vla_dataset.py 里的 fill_in_state()
+    - 如果你采用 EEF pose 表示，后续还需要修改 hdf5_vla_dataset.py 里的 fill_in_proprio()
       以及旋转四元数转 6D 的逻辑。
     """
     # 检查
@@ -336,28 +340,33 @@ def build_proprio_from_obs(obs: h5py.Group) -> np.ndarray:
     return proprio
 
 
+# 将状态观测填充到统一的向量空间中
+def fill_in_proprio(proprio):
+    # values: (..., 34)
+    # right_arm_joint_pos(7) + right_pos(3) + right_rot6d(6) + right_gripper(1)
+    # left_arm_joint_pos(7) + left_pos(3)  + left_rot6d(6)  + left_gripper(1)
 
-def copy_optional_obs_fields(obs: h5py.Group, out_obs: h5py.Group) -> None:
-    """
-    额外复制一些原始 EEF 字段，方便你后续改 parse_hdf5_file() 时直接读取。
-    这些字段不是当前官方 HDF5VLADataset 示例必须的，但保留下来更安全。
-    """
-    optional_keys = [
-        "eef_pos_left_b",
-        "eef_pos_left_w",
-        "eef_pos_right_b",
-        "eef_pos_right_w",
-        "eef_quat_left_b",
-        "eef_quat_left_w",
-        "eef_quat_right_b",
-        "eef_quat_right_w",
-        "gripper_left_pos",
-        "gripper_right_pos",
-    ]
+    assert proprio.shape[-1] == len(ISAACLAB_PROPRIO_INDICES), \
+        f"Expected {len(ISAACLAB_PROPRIO_INDICES)} dims, got {proprio.shape[-1]}"
 
-    for key in optional_keys:
-        if key in obs:
-            out_obs.create_dataset(key, data=np.asarray(obs[key]))
+    uni_proprio = np.zeros(proprio.shape[:-1] + (STATE_DIM,), dtype=np.float32)
+    uni_proprio[..., ISAACLAB_PROPRIO_INDICES] = proprio
+    return uni_proprio
+
+# 将动作也填充到统一的向量空间中
+def fill_in_action(action):
+    # values: (..., 20)
+    # right_pos(3) + right_rot6d(6) + right_gripper(1)
+    # left_pos(3)  + left_rot6d(6)  + left_gripper(1)
+    assert action.shape[-1] == len(ISAACLAB_ACTION_INDICES), \
+        f"Expected {len(ISAACLAB_ACTION_INDICES)} dims, got {action.shape[-1]}"
+
+    uni_action = np.zeros(action.shape[:-1] + (STATE_DIM,), dtype=np.float32)
+    uni_action[..., ISAACLAB_ACTION_INDICES] = action
+    return uni_action
+
+
+
 
 
 def convert_one_demo_to_episode(
@@ -386,32 +395,31 @@ def convert_one_demo_to_episode(
     actions = build_action_from_raw_action(episode["actions"])
     # 构造 proprio
     proprio = build_proprio_from_obs(obs)
-
+    # 转换到128维统一空间
+    uni_proprio = fill_in_proprio(proprio)
+    uni_action = fill_in_action(actions)
+    # 把动作和观测 的 长度对齐
     num_steps = int(actions.shape[0])
     if proprio.shape[0] != num_steps:
         min_len = min(proprio.shape[0], num_steps)
         proprio = proprio[:min_len]
         actions = actions[:min_len]
         num_steps = min_len
-    # 
+    
     with h5py.File(data_hdf5_path, "w") as f_out:
+        # 
         obs_group = f_out.create_group("observations")
         image_group = obs_group.create_group("images")
 
-        obs_group.create_dataset("proprio", data=proprio.astype(np.float32))
-        f_out.create_dataset("action", data=actions.astype(np.float32))
-
-        # 保留 EEF 原始字段，方便后续自定义 Dataset 时使用
-        copy_optional_obs_fields(obs, obs_group)
+        obs_group.create_dataset("proprio", data=uni_proprio.astype(np.float32))
+        f_out.create_dataset("action", data=uni_action.astype(np.float32))
 
         # 映射三路相机
         # 当前原始字段：
         #   zed_left         -> cam_high
         #   wrist_cam_left   -> cam_left_wrist
         #   wrist_cam_right  -> cam_right_wrist
-        camera_mapping = CAMERA_MAPPING
-
-        for out_key, src_key in camera_mapping.items():
+        for out_key, src_key in CAMERA_MAPPING.items():
             if src_key not in obs:
                 raise KeyError(f"原始 obs 中缺少相机字段：{src_key}")
 

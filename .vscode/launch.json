@@ -60,6 +60,7 @@
       "args": [
         "--input-root", "/data/isaaclab_js",
         "--output-root", "/data/rdt_js",
+        "--overwrite"
       ],
       "justMyCode": false
     },

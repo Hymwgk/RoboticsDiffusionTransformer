@@ -34,14 +34,14 @@ CAMERA_MAPPING= {
 }
 # isaaclab 数据集的本体感知 key
 ISAACLAB_PROPRIO_KEYS = [
-    "eef_pos_left_b",
-    "eef_quat_left_b",
-    "gripper_left_pos",
-    "eef_pos_right_b",
-    "eef_quat_right_b",
-    "gripper_right_pos",
-    "joint_pos_left",
-    "joint_pos_right",
+    "joint_pos_right",      # 右臂关节 7  
+    "eef_pos_right_b",      # 右手位置 3
+    "eef_quat_right_b",     # 右手姿态四元数 4
+    "gripper_right_pos",    # 右手夹爪关节 2
+    "joint_pos_left",       # 左臂关节 7
+    "eef_pos_left_b",       # 左手位置 3
+    "eef_quat_left_b",      # 左手姿态四元数 4
+    "gripper_left_pos",     # 左手夹爪关节 2
 ]
 
 
