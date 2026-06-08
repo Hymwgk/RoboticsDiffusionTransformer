@@ -147,12 +147,12 @@ rdt_js/                                       # 数据集名称
 ```bash
 data.hdf
 ├── observations               
-│   ├── proprio                # shape = (T, 34)本体感知 proprio 状态
+│   ├── proprio                # shape = (T, 128)本体感知 proprio 状态
 │   └── images
 │       ├── cam_high           # JPG 二进制流 (Bytes)  顶部相机
 │       ├── cam_left_wrist     # JPG 二进制流 (Bytes)  左手腕相机
 │       └── cam_right_wrist    # JPG 二进制流 (Bytes)  右手腕相机
-└── action                     # shape = (T, 20) 动作
+└── action                     # shape = (T, 128) 动作
 ```
 
 

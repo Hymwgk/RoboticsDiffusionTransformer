@@ -289,7 +289,7 @@ def build_action_from_raw_action(raw_action: np.ndarray) -> np.ndarray:
 
 
 
-def build_proprio_from_obs(obs: h5py.Group) -> np.ndarray:
+def build_proprio_from_obs(obs: dict) -> np.ndarray:
     """
     构造 observations/proprio。
     读取isaaclab数据集原始obs, 构造出一个状态向量：
@@ -391,9 +391,9 @@ def convert_one_demo_to_episode(
         return
 
     obs = episode["obs"]
-    # 构造 action
+    # 构造 action (T,20)
     actions = build_action_from_raw_action(episode["actions"])
-    # 构造 proprio
+    # 构造 proprio (T,34)
     proprio = build_proprio_from_obs(obs)
     # 转换到128维统一空间
     uni_proprio = fill_in_proprio(proprio)

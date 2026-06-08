@@ -13,11 +13,10 @@ from models.multimodal_encoder.siglip_encoder import SiglipVisionTower
 from models.multimodal_encoder.t5_encoder import T5Embedder
 from models.rdt_runner import RDTRunner
 
+from data.isaaclab_to_rdt import build_proprio_from_obs,fill_in_proprio
+
 from configs.isaaclab_const import LEFT_GRIPPER_MAX, RIGHT_GRIPPER_MAX, ISAACLAB_PROPRIO_INDICES, \
     ISAACLAB_ACTION_INDICES, CAMERA_MAPPING, ISAACLAB_PROPRIO_KEYS,ISAACLAB_ROT6D_ACTION_SLICE
-
-
-
 
 
 
@@ -237,96 +236,13 @@ class RoboticDiffusionTransformerModel(object):
                     images.append(Image.fromarray(img))
 
         return images
-
-
-    def _reduce_gripper(self, gripper: torch.Tensor, max_value: float) -> torch.Tensor:
-        """将obs的2个夹爪关节 映射为 1维度 0/1
-        支持输入形状: [2,] 或 [B, 2]
-        """
-        # 1. 统一转换为 2 维张量处理 [2,] -> [1, 2]
-        is_1d = (gripper.ndim == 1)
-        if is_1d:
-            gripper = gripper.unsqueeze(0) # 注意：是 unsqueeze(0) 变成 [1, 2]，而不是 unsqueeze(-1)
-
-        # 2. 此时无论是单样本还是 Batch，形状都是 [B, 2]，可以安全地做 abs 和 mean
-        # [B, 2] -> [B, 1]
-        gripper_mean = torch.mean(
-            torch.abs(gripper),
-            dim=-1,
-            keepdim=True,
-        )
-
-        # 3. 缩放到 0 ~ 1 之间
-        gripper_norm = torch.clamp(
-            gripper_mean / max_value,
-            min=0.0,
-            max=1.0,
-        )
-
-        # 4. 如果当初输入的是单向量 [2,]，则把 Batch 维度压扁，返回 [1,] 对应的 0/1 值
-        if is_1d:
-            return gripper_norm.squeeze(0)
-            
-        return gripper_norm # 返回 [B, 1]
-  
-
-    def _quat_wxyz_to_rot6d(self, quat_wxyz):
-        """ 将wxyz顺序的四元数转换为6d表征
-        quat_wxyz:
-            [4,] 或 [B, 4]
-
-        return:
-            [6,] 或 [B, 6]
-        """
-        # 1. 归一化四元数
-        quat_wxyz = F.normalize(quat_wxyz, dim=-1)
-        w, x, y, z = quat_wxyz.unbind(-1)
-        
-        xx = x * x
-        yy = y * y
-        zz = z * z
-        xy = x * y
-        xz = x * z
-        yz = y * z
-        wx = w * x
-        wy = w * y
-        wz = w * z
-
-        # 2. 构造旋转矩阵的 9 个元素
-        # 使用 dim=-1 可以天然支持单向量 [4,] 和 批处理 [B, 4]
-        rot = torch.stack([
-            1 - 2*(yy + zz),
-            2*(xy - wz),
-            2*(xz + wy),
-
-            2*(xy + wz),
-            1 - 2*(xx + zz),
-            2*(yz - wx),
-
-            2*(xz - wy),
-            2*(yz + wx),
-            1 - 2*(xx + yy),
-        ], dim=-1)
-        
-        # 3. 恢复成旋转矩阵 [3, 3] 或 [B, 3, 3]
-        if quat_wxyz.dim() == 1:
-            rotmat = rot.reshape(3, 3)
-            # 提取前两列。注意：这里去掉了错误的 transpose(1, 2)
-            # rotmat[:, :2] 的形状是 [3, 2]，直接 reshape(6) 展开
-            rot6d = rotmat[:, :2].reshape(6)
-        else:
-            # 如果是 Batch 输入 [B, 4]
-            rotmat = rot.reshape(-1, 3, 3)
-            # 提取前两列 [B, 3, 2] 并展平成 [B, 6]
-            rot6d = rotmat[:, :, :2].reshape(-1, 6)
-            
-        return rot6d
+ 
 
 
     def _build_proprio_from_obs(self, obs_dict: dict) -> torch.Tensor:
         """
         输入:
-            obs_dict:
+            obs_dict:  # torch
                 joint_pos_right      [8]
                 joint_pos_left       [8]
                 eef_pos_right_b      [3]
@@ -336,54 +252,16 @@ class RoboticDiffusionTransformerModel(object):
                 gripper_right_pos    [2]
                 gripper_left_pos     [2]
 
-        输出:
-            proprio [B, 34]
+        输出: # numpy
+            proprio [1, 34]
         """
-        missing = [k for k in ISAACLAB_PROPRIO_KEYS if k not in obs_dict]
-        if missing:
-            raise KeyError(
-                "无法构造 proprio。原始 obs 中既没有 proprio, 也缺少这些 EEF 字段："
-                + ", ".join(missing)
-            )
-        
-        right_arm_joints = obs_dict["joint_pos_right"][..., :7]
-        left_arm_joints = obs_dict["joint_pos_left"][..., :7]
 
-        right_pos = obs_dict["eef_pos_right_b"]
-        left_pos = obs_dict["eef_pos_left_b"]
-
-        right_rot6d = self._quat_wxyz_to_rot6d(obs_dict["eef_quat_right_b"])
-        left_rot6d = self._quat_wxyz_to_rot6d(obs_dict["eef_quat_left_b"])
-
-        right_gripper = self._reduce_gripper(
-            obs_dict["gripper_right_pos"],
-            RIGHT_GRIPPER_MAX,
-        )
-
-        left_gripper = self._reduce_gripper(
-            obs_dict["gripper_left_pos"],
-            LEFT_GRIPPER_MAX,
-        )
-
-        proprio = torch.cat(
-            [
-                right_arm_joints,     # 7
-                right_pos,            # 3
-                right_rot6d,          # 6
-                right_gripper,        # 1
-
-                left_arm_joints,      # 7
-                left_pos,             # 3
-                left_rot6d,           # 6
-                left_gripper,         # 1
-            ],
-            dim=-1,
-        )
-        assert proprio.shape[-1] == 34, proprio.shape
+        # 1.筛选出 ISAACLAB_PROPRIO_KEYS 中想要的 proprio 2.扩展维度 3.换为nparray 
+        proprio = {k:v[None].cpu().numpy() for k,v in obs_dict.items() if k in ISAACLAB_PROPRIO_KEYS}
+        # 转换为 34维度本体观测  [1,34]
+        proprio = build_proprio_from_obs(proprio)
+        # [1,34]
         return proprio
-
-
-
 
     def load_pretrained_weights(self, pretrained=None):
         if pretrained is None:
@@ -399,49 +277,35 @@ class RoboticDiffusionTransformerModel(object):
         else:
             raise NotImplementedError(f"Unknown checkpoint format: {pretrained}")
 
-    def _isaac_proprio_to_unformat_state(self, proprio):
+
+    def _fill_in_proprio(self,proprio):
+        """proprio [1:34] numpy array
+        
         """
-        将从isaaclab获取的本体观测信息  转换到 统一动作空间中
-        Format the robot joint state into the unified state vector.
+        # 创建 统一空间向量 
+        uni_proprio = fill_in_proprio(proprio)
+        uni_proprio_indicator = np.zeros(uni_proprio.shape[:-1] + (self.args["common"]["state_dim"],), dtype=np.float32)
+        uni_proprio_indicator[..., ISAACLAB_PROPRIO_INDICES] = 1.0
+        return uni_proprio, uni_proprio_indicator
 
-        Args:
-            proprio (torch.Tensor): The proprio state to be formatted. 
-                proprio ([B, N, 34]).
 
-        Returns:
-            state (torch.Tensor): The formatted state for RDT ([B, N, 128]). 
-        """
-        B, N, _ = proprio.shape
-        state = torch.zeros(
-            (B, N, self.args["model"]["state_token_dim"]), 
-            device=proprio.device, dtype=proprio.dtype
-        )
-        # assemble the unifed state vector
-        state[:, :, ISAACLAB_PROPRIO_INDICES] = proprio
-        state_elem_mask = torch.zeros(
-            (B, self.args["model"]["state_token_dim"]),
-            device=proprio.device, dtype=proprio.dtype
-        )
-        state_elem_mask[:, ISAACLAB_PROPRIO_INDICES] = 1
-        return state, state_elem_mask
-
-    def _unformat_action_to_isaac_action(self, unformat_action):
+    def _uni_vec_to_action(self, uni_vec):
         # 将统一动作空间  转换  为isaaclab动作空间  [B,chunk,N]
-        isaac_rot6d_action = unformat_action[:, :, ISAACLAB_ACTION_INDICES]
+        rot6d_action = uni_vec[:, :, ISAACLAB_ACTION_INDICES]
         # 将动作转换为isaaclab动作，主要是6d动作转换
-        right_pos = isaac_rot6d_action[:, :, ISAACLAB_ROT6D_ACTION_SLICE['right_pos']]
-        right_rot6d = isaac_rot6d_action[:,:,ISAACLAB_ROT6D_ACTION_SLICE['right_rot6d']]
-        right_gripper = isaac_rot6d_action[:, :, ISAACLAB_ROT6D_ACTION_SLICE['right_gripper']]
+        right_pos = rot6d_action[:, :, ISAACLAB_ROT6D_ACTION_SLICE['right_pos']]
+        right_rot6d = rot6d_action[:,:,ISAACLAB_ROT6D_ACTION_SLICE['right_rot6d']]
+        right_gripper = rot6d_action[:, :, ISAACLAB_ROT6D_ACTION_SLICE['right_gripper']]
 
-        left_pos = isaac_rot6d_action[:, :, ISAACLAB_ROT6D_ACTION_SLICE['left_pos']]
-        left_rot6d = isaac_rot6d_action[:,:,ISAACLAB_ROT6D_ACTION_SLICE['left_rot6d']]
-        left_gripper = isaac_rot6d_action[:, :, ISAACLAB_ROT6D_ACTION_SLICE['left_gripper']]
+        left_pos = rot6d_action[:, :, ISAACLAB_ROT6D_ACTION_SLICE['left_pos']]
+        left_rot6d = rot6d_action[:,:,ISAACLAB_ROT6D_ACTION_SLICE['left_rot6d']]
+        left_gripper = rot6d_action[:, :, ISAACLAB_ROT6D_ACTION_SLICE['left_gripper']]
         # 左右手的动作处理
         right_wxyz_quat = self._rot6d_to_wxyz_quat(right_rot6d)
         left_wxyz_quat = self._rot6d_to_wxyz_quat(left_rot6d)
         # TODO gripper 的动作要转换么？ 检查一下
         # 拼接起来
-        isaac_action = torch.cat(
+        action = torch.cat(
             [
                 right_pos,
                 right_wxyz_quat,
@@ -452,9 +316,9 @@ class RoboticDiffusionTransformerModel(object):
             ],
             dim=-1
         )       
-        assert isaac_action.shape[-1] == 20, isaac_action.shape
+        assert action.shape[-1] == 16, action.shape
         # denormalize to action space 不进行缩放 TODO 检查一下在微调的时候是否使用的就是归一化动作？
-        return isaac_action
+        return action
 
     @torch.no_grad()
     def step(self, obs_dict, text_embeds):
@@ -518,14 +382,15 @@ class RoboticDiffusionTransformerModel(object):
         image_embeds = self.vision_model(image_tensor).detach()
         image_embeds = image_embeds.reshape(-1, self.vision_model.hidden_size).unsqueeze(0)
 
-        # history of actions 
+        # [1,34] nparray
         proprio = self._build_proprio_from_obs(obs_dict)
-
-        proprio = proprio.unsqueeze(0).unsqueeze(0) # (1,1,34)
-        #proprio = proprio.to(device).unsqueeze(0)   # (1, 1, 34)
-        states, state_elem_mask = self._isaac_proprio_to_unformat_state(proprio)    # (1, 1, 128), (1, 128)
-        states, state_elem_mask = states.to(device, dtype=dtype), state_elem_mask.to(device, dtype=dtype)
-        states = states[:, -1:, :]  # (1, 1, 128)
+        # [1,128]     [1,128]
+        uni_proprio, uni_proprio_indicator = self._fill_in_proprio(proprio)
+        # [1,1,128]  
+        uni_proprio = torch.as_tensor(uni_proprio,device=device,dtype=dtype,)[None]
+        # [1,1,128]
+        uni_proprio_indicator = torch.as_tensor(uni_proprio_indicator,device=device,dtype=dtype,)[None]  
+        
         ctrl_freqs = torch.tensor([self.control_frequency]).to(device)
         
         text_embeds = text_embeds.to(device, dtype=dtype)
@@ -540,10 +405,11 @@ class RoboticDiffusionTransformerModel(object):
                 text_embeds.shape[:2], dtype=torch.bool,
                 device=text_embeds.device),
             img_tokens=image_embeds,
-            state_tokens=states,
-            action_mask=state_elem_mask.unsqueeze(1),  
+            state_tokens=uni_proprio,
+            action_mask=uni_proprio_indicator,  
             ctrl_freqs=ctrl_freqs
         )
-        trajectory = self._unformat_action_to_isaac_action(trajectory).to(torch.float32) # (1,T,16)
+        # [1,T,128] -> [1,T,16]
+        trajectory = self._uni_vec_to_action(trajectory).to(torch.float32) 
 
         return trajectory

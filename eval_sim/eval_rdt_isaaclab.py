@@ -56,6 +56,7 @@ import imageio
 import numpy as np
 import os
 
+
 def save_success_video(traj, trial_idx, ckpt_path, fps=20):
     """
     将成功的 trajectory 保存为视频。
@@ -191,12 +192,8 @@ def rollout(policy, env, text_embed, success_term, horizon, device):
             else:
                 obs_to_store[k] = v
         traj["obs"].append(obs_to_store)
-
-        # 确保 obs 在 GPU 上传入模型
-        obs_gpu = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in obs.items()}
-
         
-        pred_actions = policy.step(obs_gpu, text_embed).squeeze(0)
+        pred_actions = policy.step(obs, text_embed).squeeze(0)
         exec_actions = pred_actions[::4][:exec_horizon]
 
         # 开环执行少量 action，然后重新观测
