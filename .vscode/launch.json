@@ -19,7 +19,7 @@
       "env": {
         "NCCL_SOCKET_IFNAME": "lo",
         "NCCL_IB_DISABLE": "1",
-        "CUDA_VISIBLE_DEVICES": "1",
+        "CUDA_VISIBLE_DEVICES": "0",  // 调试时，使用0号显卡
         "HF_HOME": "/model/huggingface",
         "HUGGINGFACE_HUB_CACHE": "/model/huggingface/hub",
         "TEXT_ENCODER_NAME": "google/t5-v1_1-xxl",
