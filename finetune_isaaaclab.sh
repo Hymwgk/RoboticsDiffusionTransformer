@@ -14,8 +14,8 @@ export HUGGINGFACE_HUB_CACHE=/model/huggingface/hub
 # 保持默认，前提是按照教程设置了软链接（见Readme），否则需要修改为实际路径
 export TEXT_ENCODER_NAME="google/t5-v1_1-xxl"
 export VISION_ENCODER_NAME="google/siglip-so400m-patch14-384"
-# 设定为自己账户 wgk 文件夹下
-export OUTPUT_DIR="/model/wgk/checkpoints/rdt-finetune-1b-sim"
+# 需要按照 README.md 提前设置软链接
+export OUTPUT_DIR="checkpoints/rdt-finetune-1b-sim"
 # 默认不管
 export CFLAGS="-I/usr/include"
 export LDFLAGS="-L/usr/lib/x86_64-linux-gnu"

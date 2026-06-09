@@ -36,7 +36,7 @@
         "--pretrained_model_name_or_path", "robotics-diffusion-transformer/rdt-1b",
         "--pretrained_text_encoder_name_or_path", "google/t5-v1_1-xxl",
         "--pretrained_vision_encoder_name_or_path", "google/siglip-so400m-patch14-384",
-        "--output_dir", "/model/wgk/checkpoints/debug-rdt",
+        "--output_dir", "checkpoints/debug-rdt",
         "--precomp_lang_embed",
         "--train_batch_size", "16",
         "--sample_batch_size", "1",

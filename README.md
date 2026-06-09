@@ -309,6 +309,13 @@ rdt_js/
    mkdir -p datasets
    # 创建软链接
    ln -s /data/rdt_js   datasets/rdt_js
+
+   # 创建checkpoint文件夹
+   mkdir -p checkpoints
+   # 创建软链接
+   cd ..
+   ln -s /model/checkpoints   checkpoints/
+
    ```
 
 2. 计算转换后的rdt数据集统计量 **注意:** 每次变动数据集都要重新计算一边
