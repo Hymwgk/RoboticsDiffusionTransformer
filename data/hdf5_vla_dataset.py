@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 
 from configs.isaaclab_const import ISAACLAB_PROPRIO_INDICES, ISAACLAB_ACTION_INDICES
+from data.isaaclab_to_rdt import fill_in_action,fill_in_proprio
 
 
 class HDF5VLADataset:
@@ -167,8 +168,8 @@ class HDF5VLADataset:
                 ], axis=0)
             
 
-            state_indicator = np.zeros(state.shape[:-1] + (self.STATE_DIM,), dtype=np.float32)
-            state_indicator[..., ISAACLAB_PROPRIO_INDICES] = 1.0
+            state_indicator = np.zeros(self.STATE_DIM, dtype=np.float32)
+            state_indicator[ISAACLAB_PROPRIO_INDICES] = 1.0 # [128,]
 
             
             # Parse the images
@@ -212,18 +213,18 @@ class HDF5VLADataset:
             # if the left-wrist camera is unavailable on your robot
             return True, {
                 "meta": meta,
-                "state": state,
-                "state_std": state_std,   # TODO debug检查是否在微调过程中使用了 统计量进行归一化？
-                "state_mean": state_mean,
-                "state_norm": state_norm,
-                "actions": actions,
-                "state_indicator": state_indicator,
-                "cam_high": cam_high,
-                "cam_high_mask": cam_high_mask,
-                "cam_left_wrist": cam_left_wrist,
-                "cam_left_wrist_mask": cam_left_wrist_mask,
-                "cam_right_wrist": cam_right_wrist,
-                "cam_right_wrist_mask": cam_right_wrist_mask
+                "state": state, # [1,128]
+                "state_std": state_std,   # [1,128]TODO debug检查是否在微调过程中使用了 统计量进行归一化？
+                "state_mean": state_mean,    # [1,128]
+                "state_norm": state_norm,    # [1,128]
+                "actions": actions,  # [C,128]
+                "state_indicator": state_indicator,   #[128,]
+                "cam_high": cam_high,  # [2, H,W,C]
+                "cam_high_mask": cam_high_mask, # [2,]
+                "cam_left_wrist": cam_left_wrist, # [2, H,W,C]
+                "cam_left_wrist_mask": cam_left_wrist_mask, # [2]
+                "cam_right_wrist": cam_right_wrist,  # [2, H,W,C]
+                "cam_right_wrist_mask": cam_right_wrist_mask # [2,]
             }
 
     def parse_hdf5_file_state_only(self, file_path):
@@ -243,32 +244,16 @@ class HDF5VLADataset:
             else:
                 raise ValueError("Found no proprio that exceeds the threshold.")
 
-            state = proprio[first_idx - 1:]
+            proprio = proprio[first_idx - 1:]
             action = action_all[first_idx - 1:]
 
-            def fill_in_state(values):
-                # values: (..., 34)
-                assert values.shape[-1] == len(ISAACLAB_PROPRIO_INDICES), \
-                    f"Expected {len(ISAACLAB_PROPRIO_INDICES)} dims, got {values.shape[-1]}"
 
-                uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,), dtype=np.float32)
-                uni_vec[..., ISAACLAB_PROPRIO_INDICES] = values
-                return uni_vec
 
-            def fill_in_action(values):
-                # values: (..., 20)
-                assert values.shape[-1] == len(ISAACLAB_ACTION_INDICES), \
-                    f"Expected {len(ISAACLAB_ACTION_INDICES)} dims, got {values.shape[-1]}"
-
-                uni_vec = np.zeros(values.shape[:-1] + (self.STATE_DIM,), dtype=np.float32)
-                uni_vec[..., ISAACLAB_ACTION_INDICES] = values
-                return uni_vec
-
-            state = fill_in_state(state)
-            action = fill_in_action(action)
+            # proprio = fill_in_proprio(proprio)
+            # action = fill_in_action(action)
 
             return True, {
-                "state": state,
+                "state": proprio,
                 "action": action,
             }
 

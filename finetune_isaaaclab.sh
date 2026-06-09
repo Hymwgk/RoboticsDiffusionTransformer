@@ -1,6 +1,8 @@
 # 适合单机训练
 export NCCL_IB_HCA=mlx5_0:1,mlx5_1:1,mlx5_2:1,mlx5_3:1,mlx5_4:1,mlx5_7:1,mlx5_8:1,mlx5_9:1
 export NCCL_IB_DISABLE=1
+# 指定使用第2个GPU
+export CUDA_VISIBLE_DEVICES=1 
 # 设置为本地回环接口，避免NCCL尝试使用其他网络接口进行通信，这在单机训练时是合适的
 export NCCL_SOCKET_IFNAME=lo   
 export NCCL_DEBUG=INFO
@@ -41,17 +43,17 @@ accelerate launch --num_processes=1  main.py \
     --pretrained_vision_encoder_name_or_path=$VISION_ENCODER_NAME \
     --precomp_lang_embed \
     --output_dir=$OUTPUT_DIR \
-    --train_batch_size=1 \
+    --train_batch_size=16 \
     --sample_batch_size=1 \
-    --gradient_accumulation_steps=24 \
-    --max_train_steps=400000 \
+    --gradient_accumulation_steps=2 \
+    --max_train_steps=40000 \
     --checkpointing_period=10000 \
     --sample_period=500 \
-    --checkpoints_total_limit=40 \
+    --checkpoints_total_limit=2 \
     --lr_scheduler="constant" \
     --learning_rate=1e-4 \
     --mixed_precision="bf16" \
-    --dataloader_num_workers=4 \
+    --dataloader_num_workers=2 \
     --image_aug \
     --dataset_type="finetune" \
     --state_noise_snr=40 \

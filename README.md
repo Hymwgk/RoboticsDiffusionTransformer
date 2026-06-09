@@ -361,7 +361,7 @@ rdt_js/
     --pretrained_model_name_or_path="robotics-diffusion-transformer/rdt-1b" \
     --pretrained_text_encoder_name_or_path=$TEXT_ENCODER_NAME \
     --pretrained_vision_encoder_name_or_path=$VISION_ENCODER_NAME \
-    --precomp_lang_embed \
+    --precomp_lang_embed \  # 带有此项，直接加载预编码的指令embedding  而并非在线编码
     --output_dir=$OUTPUT_DIR \
     --train_batch_size=1 \       # 批次大小
     --sample_batch_size=1 \      # 训练时进行验证的样本采样大小 
