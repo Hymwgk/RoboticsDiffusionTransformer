@@ -356,64 +356,34 @@ rdt_js/
    使用该指令开始微调:
 
    ```bash
-   # 这是多卡
-   source finetune.sh
-   # 这是单卡
-   source finetune_maniskill.sh
+   # 单卡微调
+   bash finetune_isaaclab.sh
    ```
 
   ```bash
-   accelerate launch --num_processes=1  main.py \    # 单卡
+   accelerate launch --num_processes=1  main.py \    # --num_processes=1单卡训练
     --deepspeed="./configs/zero2.json" \
     --pretrained_model_name_or_path="robotics-diffusion-transformer/rdt-1b" \
     --pretrained_text_encoder_name_or_path=$TEXT_ENCODER_NAME \
     --pretrained_vision_encoder_name_or_path=$VISION_ENCODER_NAME \
-    --precomp_lang_embed \  # 带有此项，直接加载预编码的指令embedding  而并非在线编码
+    --precomp_lang_embed \  # 带有此项，直接加载预编码的指令embedding  而并非加载T5语言模型进行在线编码
     --output_dir=$OUTPUT_DIR \
-    --train_batch_size=1 \       # 批次大小
+    --train_batch_size=16 \       # 批次大小
     --sample_batch_size=1 \      # 训练时进行验证的样本采样大小 
-    --gradient_accumulation_steps=24 \  # 对梯度进行累积，等效为train_batch_size*gradient_accumulation_steps的batch size
+    --gradient_accumulation_steps=2 \  # 对梯度进行累积，等效为train_batch_size * gradient_accumulation_steps的batch size
     --max_train_steps=400000 \   # 训练步数，优先级高于 num_train_epochs
-    --checkpointing_period=10000 \
-    --sample_period=500 \
-    --checkpoints_total_limit=40 \
+    --checkpointing_period=10000 \ # 每隔多少次update进行一次checkpoint保存
+    --sample_period=500 \ # 每隔多少次update进行一次采样
+    --checkpoints_total_limit=40 \ # 限制训练过程中最多保存多少个checkpoint ？
     --lr_scheduler="constant" \
     --learning_rate=1e-4 \
     --mixed_precision="bf16" \
-    --dataloader_num_workers=4 \
-    --image_aug \
+    --dataloader_num_workers=4 \ # 数据加载线程数量
+    --image_aug \  # If you want to use image augmentation
     --dataset_type="finetune" \
     --state_noise_snr=40 \
-    --load_from_hdf5 \
+    --load_from_hdf5 \  # 数据集是hdf5格式的话，用这个选项
     --report_to=wandb
-   ```
-
-
-
-   with `finetune.sh` detailed as below:
-
-   ```bash
-      deepspeed --hostfile=hostfile.txt main.py \
-         --deepspeed="./configs/zero2.json" \   # If you want to use DeepSpeed, which is strongly recommended
-         --pretrained_model_name_or_path=<MODEL ID | DIRECTORY OF MODEL WEIGHTS | PATH TO MODEL CHECKPOINT> \
-         --pretrained_text_encoder_name_or_path=<MODEL ID | PATH TO MODEL DIRECTORY > \   # e.g., google/t5-v1_1-xxl
-         --pretrained_vision_encoder_name_or_path=<MODEL ID | PATH TO MODEL DIRECTORY> \  # e.g., google/siglip-so400m-patch14-384
-         --output_dir=<DIRECTORY to SAVE CHECKPOINTS> \ # e.g., checkpoints/rdt-1b-agilex
-         --train_batch_size=32 \
-         --sample_batch_size=64 \   # batch size for diffusion sampling in validation 
-         --max_train_steps=200000 \
-         --checkpointing_period=1000 \
-         --sample_period=500 \   # sample period for validation
-         --checkpoints_total_limit=40 \
-         --lr_scheduler="constant" \
-         --learning_rate=1e-4 \
-         --mixed_precision="bf16" \ # If you want to use mixed precision, bf16 is recommended
-         --dataloader_num_workers=8 \
-         --image_aug \  # If you want to use image augmentation
-         --dataset_type="finetune" \
-         --state_noise_snr=40 \  # If you want to add noise to the state
-         --load_from_hdf5 \   # If you use HDF5 to store your data
-         --report_to=wandb
    ```
 
    **IMPORTANT**: 如果已经选择使用预先编码的语言embedding来当作语言指令，那么就要在`finetune.sh`中对`--precomp_lang_embed` 进行指定.
@@ -436,13 +406,21 @@ rdt_js/
 
 
 
-## 在Isaaclab在线测试
+## 微调结束后，在Isaaclab中进行在线仿真测试
 
+安装我们调整后的isaaclab
+```bash
+git clone https://github.com/Jc123-code/Isaaclab1.0.git
+```
+根据isaaclab中的README.md文件进行项目安装。
 
-安装了我们调整后的isaaclab
-
---task
---pretrained_path
+执行单任务测试
+```bash
+# 激活isaaclab需要的环境
+conda activate env_isaaclab
+# 在本项目根目录下执行，默认即为 headless模式
+python -m eval_sim.eval_rdt_isaaclab --task "任务名称" --pretrained_path "微调后rdt的权重地址"  --enable_cameras 
+```
 
 
 
