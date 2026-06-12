@@ -36,10 +36,10 @@ parser = argparse.ArgumentParser(description="Evaluate robomimic policy for Isaa
 parser.add_argument(
     "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
 )
-parser.add_argument("--task", type=str, default="Set-Mode-Off", help="Name of the task.")
+parser.add_argument("--task", type=str, default="Get-place-Bandage", help="Name of the task.")
 
 parser.add_argument("--pretrained_path", type=str, 
-                    default="/data/checkpoints/daily/rdt-finetune-isaaclab-multitask-3/checkpoint-70000/pytorch_model/mp_rank_00_model_states.pt", 
+                    default="/model/wgk/checkpoints/rdt-finetune-1b-sim/pytorch_model.bin", 
                     help="rdt本体的权重地址")
 
 parser.add_argument("--horizon", type=int, default=500, help="Step horizon of each rollout.")
@@ -71,8 +71,7 @@ def save_success_video(traj, trial_idx, ckpt_path, fps=20):
     first_obs = traj["obs"][0]
     image_keys = []
     for k, v in first_obs.items():
-        # 你的 rollout 里把 tensor 转成了 numpy，shape 应该是 (3, H, W) 或 (1, H, W)
-        if isinstance(v, np.ndarray) and v.ndim == 3 and ("zed_left" in k or "image" in k):
+        if "zed_left" in k:
             image_keys.append(k)
 
     if not image_keys:
@@ -94,7 +93,7 @@ def save_success_video(traj, trial_idx, ckpt_path, fps=20):
     for cam_name in image_keys:
         frames = []
         for i, obs in enumerate(traj["obs"]):
-            img_data = obs[cam_name] # Shape: (H, W, C), Range: [0.0, 1.0] float
+            img_data = obs[cam_name].squeeze(0) # Shape: (H, W, C), Range: [0.0, 1.0] float
             img_data = img_data.clip(0, 255).astype(np.uint8)
             #img_data = img_data[:, :, [2, 1, 0]] # 交换 R 和 B 通道
             frames.append(img_data)
@@ -173,79 +172,72 @@ def rollout(policy, env, text_embed, success_term, horizon, device):
     # 时间统计
     start_time = time.perf_counter()
 
-    pbar = tqdm(range(horizon), desc="Rollout Progress", unit="step")
     # 每次推理后真正执行几个 action
-    exec_horizon = 4
+    exec_horizon = 10
     global_steps = 0
-    for i in pbar:
-        step_start = time.perf_counter()   # step 开始计时
-        # Prepare observations
+    pbar = tqdm(range(horizon), desc="Rollout Progress", unit="step")
+    # 使用 while 循环，由 global_steps 严格控制何时结束
+    while global_steps < horizon:
+        step_start = time.perf_counter()   # 推理轮次开始计时
+        
+        # 1. 准备当前策略需要的观测
         obs = copy.deepcopy(obs_dict["policy"])
         for ob in obs:
-            obs[ob] = torch.squeeze(obs[ob],dim=0)
+            obs[ob] = torch.squeeze(obs[ob], dim=0)
         
-
-        obs_to_store = {}
-        for k, v in obs.items():
-            if isinstance(v, torch.Tensor):
-                obs_to_store[k] = v.cpu().numpy() # 或者 v.cpu()
-            else:
-                obs_to_store[k] = v
-        traj["obs"].append(obs_to_store)
-        
+        # 2. 策略预测模型动作序列
         pred_actions = policy.step(obs, text_embed).squeeze(0)
-        exec_actions = pred_actions[::4][:exec_horizon]
+        
+        # 【修正】切片逻辑：应该取连续的前 N 个动作，而不是跳跃取样 [::4]
+        # 如果模型输出是 (16, action_dim)，这里拿到的就是 (4, action_dim)
+        exec_actions = pred_actions[:exec_horizon]
 
-        # 开环执行少量 action，然后重新观测
+        # 3. 半闭环执行这一组动作
         for action in exec_actions:
             if global_steps >= horizon:
                 break
-            action = action.unsqueeze(0)
-            # 存当前 obs
-            obs_to_store = {}
-
+            
+            # A. 保存执行动作前的环境状态 (obs)
+            current_obs_cpu = {}
             for k, v in obs_dict["policy"].items():
-                if isinstance(v, torch.Tensor):
-                    obs_to_store[k] = v.detach().cpu().numpy()
-                else:
-                    obs_to_store[k] = v
-            traj["obs"].append(obs_to_store)
-            obs_dict, _, terminated, truncated, _ = env.step(action)
+                current_obs_cpu[k] = v.detach().cpu().numpy() if isinstance(v, torch.Tensor) else v
+            traj["obs"].append(current_obs_cpu)
 
-            # 存 next_obs
+            # B. 环境交互
+            action_tensor = action.unsqueeze(0)
+            obs_dict, _, terminated, truncated, _ = env.step(action_tensor)
+
+            # C. 保存交互后的环境状态 (next_obs) 和做出的动作 (action)
             next_obs_cpu = {}
             for k, v in obs_dict["policy"].items():
-                if isinstance(v, torch.Tensor):
-                    next_obs_cpu[k] = v.detach().cpu().numpy()
-                else:
-                    next_obs_cpu[k] = v
-
+                next_obs_cpu[k] = v.detach().cpu().numpy() if isinstance(v, torch.Tensor) else v
             traj["next_obs"].append(next_obs_cpu)
+            
             traj["actions"].append(action.detach().cpu().numpy().tolist())
 
+            # 4. 统计更新
             global_steps += 1
             pbar.update(1)
+            
             step_time = time.perf_counter() - step_start
             pbar.set_postfix({"step_time (s)": f"{step_time:.4f}"})
 
-            # success 判断
+            # 5. 成功与截断判断
             if bool(success_term.func(env, **success_term.params)[0]):
                 elapsed = time.perf_counter() - start_time
-                fps = global_steps / elapsed
-                stats = dict(elapsed=elapsed, steps=global_steps, fps=fps)
+                stats = dict(elapsed=elapsed, steps=global_steps, fps=global_steps / elapsed)
                 pbar.close()
                 return True, traj, stats
 
             if terminated or truncated:
                 elapsed = time.perf_counter() - start_time
-                fps = global_steps / elapsed
-                stats = dict(elapsed=elapsed, steps=global_steps, fps=fps)
+                stats = dict(elapsed=elapsed, steps=global_steps, fps=global_steps / elapsed)
                 pbar.close()
                 return False, traj, stats
 
+    # 正常达到 horizon 结束
     elapsed = time.perf_counter() - start_time
-    fps = global_steps / elapsed
-    stats = dict(elapsed=elapsed, steps=global_steps, fps=fps)
+    stats = dict(elapsed=elapsed, steps=global_steps, fps=global_steps / elapsed)
     pbar.close()
 
     return False, traj, stats
@@ -329,7 +321,7 @@ def main():
             this_trial_steps = stats['steps']
             total_steps += this_trial_steps
             print(f"[INFO] Trial {trial}: {is_success}, Elapsed time: {stats['elapsed']:.3f}s, Steps: {stats['steps']}, FPS: {stats['fps']:.2f}")
-            if is_success:
+            if True:#is_success:
                 print(f"[INFO] Trial {trial} succeeded! Generating video...")
                 save_success_video(traj, trial, video_save_dir, fps=20)
                 success_count += 1

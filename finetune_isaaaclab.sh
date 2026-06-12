@@ -23,6 +23,9 @@ export CUTLASS_PATH="./data/cutlass"
 # 设置wandb的项目名称和离线模式，确保训练日志能够正确记录到指定项目中，并且避免wandb尝试连接服务器
 export WANDB_PROJECT="robotic_diffusion_transformer"
 export WANDB_MODE=offline
+# 强制加载离线模型
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
 
 
 if [ ! -d "$OUTPUT_DIR" ]; then
@@ -46,8 +49,8 @@ accelerate launch --num_processes=1  main.py \
     --train_batch_size=16 \
     --sample_batch_size=1 \
     --gradient_accumulation_steps=2 \
-    --max_train_steps=40000 \
-    --checkpointing_period=10000 \
+    --max_train_steps=200000 \
+    --checkpointing_period=2000 \
     --sample_period=500 \
     --checkpoints_total_limit=2 \
     --lr_scheduler="constant" \

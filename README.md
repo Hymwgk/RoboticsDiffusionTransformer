@@ -356,8 +356,8 @@ rdt_js/
    使用该指令开始微调:
 
    ```bash
-   # 单卡微调
-   bash finetune_isaaclab.sh
+   # 单卡微调 同时保留训练日志
+   bash finetune_isaaaclab.sh 2>&1 | tee train.log
    ```
 
   ```bash
@@ -371,7 +371,7 @@ rdt_js/
     --train_batch_size=16 \       # 批次大小
     --sample_batch_size=1 \      # 训练时进行验证的样本采样大小 
     --gradient_accumulation_steps=2 \  # 对梯度进行累积，等效为train_batch_size * gradient_accumulation_steps的batch size
-    --max_train_steps=400000 \   # 训练步数，优先级高于 num_train_epochs
+    --max_train_steps=40000 \   # 训练步数，优先级高于 num_train_epochs
     --checkpointing_period=10000 \ # 每隔多少次update进行一次checkpoint保存
     --sample_period=500 \ # 每隔多少次update进行一次采样
     --checkpoints_total_limit=40 \ # 限制训练过程中最多保存多少个checkpoint ？

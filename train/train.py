@@ -275,7 +275,7 @@ def train(args, logger):
         collate_fn=data_collator,
         num_workers=args.dataloader_num_workers,
         pin_memory=True,
-        persistent_workers=True
+        persistent_workers=args.dataloader_num_workers > 0
     )
     sample_dataloader = torch.utils.data.DataLoader(
         sample_dataset,
@@ -284,7 +284,7 @@ def train(args, logger):
         collate_fn=data_collator,
         num_workers=args.dataloader_num_workers,
         pin_memory=True,
-        persistent_workers=True
+        persistent_workers=args.dataloader_num_workers > 0
     )
     
     # Scheduler and math around the number of training steps.
