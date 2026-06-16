@@ -244,8 +244,8 @@ def rotmat_to_rot6d(rotmat):
 def build_action_from_raw_action(raw_action: np.ndarray) -> np.ndarray:
     """
     raw_action: (T, 16)
-      right_pos(3) + right_quat_wxyz(4) + right_gripper(1)
       left_pos(3)  + left_quat_wxyz(4)  + left_gripper(1)
+      right_pos(3) + right_quat_wxyz(4) + right_gripper(1)
 
     return: (T, 20)
       right_pos(3) + right_rot6d(6) + right_gripper(1)
@@ -256,17 +256,17 @@ def build_action_from_raw_action(raw_action: np.ndarray) -> np.ndarray:
     assert raw_action.ndim == 2, raw_action.shape
     assert raw_action.shape[-1] == 16, raw_action.shape
 
+    left_pos = raw_action[:, ISAACLAB_RAW_ACTION_SLICE["left_pos"]]
+    left_quat = raw_action[:, ISAACLAB_RAW_ACTION_SLICE["left_quat_wxyz"]]
+    left_gripper = raw_action[:, ISAACLAB_RAW_ACTION_SLICE["left_gripper"]]
 
     right_pos = raw_action[:, ISAACLAB_RAW_ACTION_SLICE["right_pos"]]
     right_quat = raw_action[:, ISAACLAB_RAW_ACTION_SLICE["right_quat_wxyz"]]
     right_gripper = raw_action[:, ISAACLAB_RAW_ACTION_SLICE["right_gripper"]]
 
-    left_pos = raw_action[:, ISAACLAB_RAW_ACTION_SLICE["left_pos"]]
-    left_quat = raw_action[:, ISAACLAB_RAW_ACTION_SLICE["left_quat_wxyz"]]
-    left_gripper = raw_action[:, ISAACLAB_RAW_ACTION_SLICE["left_gripper"]]
-
-    right_gripper = np.clip(right_gripper, 0.0, 1.0).astype(np.float32)
-    left_gripper = np.clip(left_gripper, 0.0, 1.0).astype(np.float32)
+    # 无须进行clip，直接预测isaaclab动作-1/1即可，无须预测 手柄动作0/1
+    right_gripper = np.clip(right_gripper, -1.0, 1.0).astype(np.float32)
+    left_gripper = np.clip(left_gripper, -1.0, 1.0).astype(np.float32)
 
     right_rot6d = quat_wxyz_to_rot6d(right_quat)
     left_rot6d = quat_wxyz_to_rot6d(left_quat)

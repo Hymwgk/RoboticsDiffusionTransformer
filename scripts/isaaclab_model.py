@@ -297,13 +297,26 @@ class RoboticDiffusionTransformerModel(object):
         # 将统一动作空间  转换  为isaaclab动作空间  [B,chunk,N]
         rot6d_action = uni_vec[:, :, ISAACLAB_ACTION_INDICES]
         # 将动作转换为isaaclab动作，主要是6d动作转换
-        right_pos = rot6d_action[:, :, ISAACLAB_ROT6D_ACTION_SLICE['right_pos']]
-        right_rot6d = rot6d_action[:,:,ISAACLAB_ROT6D_ACTION_SLICE['right_rot6d']]
-        right_gripper = rot6d_action[:, :, ISAACLAB_ROT6D_ACTION_SLICE['right_gripper']]
-
         left_pos = rot6d_action[:, :, ISAACLAB_ROT6D_ACTION_SLICE['left_pos']]
         left_rot6d = rot6d_action[:,:,ISAACLAB_ROT6D_ACTION_SLICE['left_rot6d']]
         left_gripper = rot6d_action[:, :, ISAACLAB_ROT6D_ACTION_SLICE['left_gripper']]
+
+        right_pos = rot6d_action[:, :, ISAACLAB_ROT6D_ACTION_SLICE['right_pos']]
+        right_rot6d = rot6d_action[:,:,ISAACLAB_ROT6D_ACTION_SLICE['right_rot6d']]
+        right_gripper = rot6d_action[:, :, ISAACLAB_ROT6D_ACTION_SLICE['right_gripper']]
+        # 将gripper动作转换为 -1/1 的isaaclab env 动作
+        left_gripper = torch.where(
+            left_gripper > 0.0,
+            torch.ones_like(left_gripper),
+            -torch.ones_like(left_gripper),
+        )
+
+        right_gripper = torch.where(
+            right_gripper > 0.0,
+            torch.ones_like(right_gripper),
+            -torch.ones_like(right_gripper),
+        )
+
         # 左右手的动作处理
         right_wxyz_quat = self._rot6d_to_wxyz_quat(right_rot6d)
         left_wxyz_quat = self._rot6d_to_wxyz_quat(left_rot6d)
@@ -311,12 +324,12 @@ class RoboticDiffusionTransformerModel(object):
         # 拼接起来
         action = torch.cat(
             [
-                right_pos,
-                right_wxyz_quat,
-                right_gripper,
                 left_pos,
                 left_wxyz_quat,
                 left_gripper,
+                right_pos,
+                right_wxyz_quat,
+                right_gripper,
             ],
             dim=-1
         )       

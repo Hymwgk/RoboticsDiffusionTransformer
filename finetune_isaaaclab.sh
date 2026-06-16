@@ -46,9 +46,9 @@ accelerate launch --num_processes=1  main.py \
     --pretrained_vision_encoder_name_or_path=$VISION_ENCODER_NAME \
     --precomp_lang_embed \
     --output_dir=$OUTPUT_DIR \
-    --train_batch_size=16 \
+    --train_batch_size=4 \
     --sample_batch_size=1 \
-    --gradient_accumulation_steps=2 \
+    --gradient_accumulation_steps=1 \
     --max_train_steps=200000 \
     --checkpointing_period=2000 \
     --sample_period=500 \

@@ -210,9 +210,9 @@ task.hdf5
     │   │   ├── wrist_cam_right          # 右手腕部相机视角图像 (T,480,640,3) dtype=uint8 (0~255)
     │   │   └── table_cam                # 台面/全局视角固定相机图像 (T,480,640,3) dtype=uint8 (0~255)
     │   │
-    │   └── actions                      # 动作空间：双臂控制目标输出 (T,16) dtype=float32 TODO：action似乎并没有用控制量，检查一下
-    │                                    # r_ee_pos(3) + r_quat_wxyz(4) + r_gripper(1) + l_ee_pos(3) + l_quat_wxyz(4) + l_gripper(1)
-    │                                    # 夹爪动作 r/l_gripper 范围[-1,1] 开1  闭-1
+    │   └── actions                      # 动作空间满足先左后右，双臂控制目标输出 (T,16) dtype=float32 TODO：action似乎并没有用控制量，检查一下
+    │                                    # l_ee_pos(3) + l_quat_wxyz(4) + l_gripper(1) + r_ee_pos(3) + r_quat_wxyz(4) + r_gripper(1)
+    │                                    # Isaaclab 环境夹爪动作 r/l_gripper 范围[-1,1] 开1  闭-1
     ├── demo_1                           # 回合1 (结构与 demo_0 完全一致)
     └── demo_2                           # 回合2 ...
 ```
